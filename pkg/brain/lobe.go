@@ -1,6 +1,8 @@
 package brain
 
-import "github.com/mechanical-lich/brain-lib/pkg/ann"
+import (
+	"github.com/mechanical-lich/brain-lib/pkg/ann"
+)
 
 type Lobe struct {
 	Name       string
@@ -16,12 +18,13 @@ func NewLobe(name string, numInputs int, numOutputs int, ann *ann.ANN) *Lobe {
 
 func (l *Lobe) Process(inputs []float64) []float64 {
 	l.outputs = make([]float64, l.numOutputs)
-
 	// Passthrough lobe
 	if l.ann == nil {
 		for i := range l.outputs {
 			l.outputs[i] = inputs[i]
 		}
+	} else {
+		l.outputs = l.ann.Process(inputs)
 	}
 	return l.outputs
 }
