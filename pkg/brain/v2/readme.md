@@ -1,0 +1,1 @@
+Where v1 of the brain had a single entry point for getting inputs and outputs this version is more geared towards being prefed inputs directly to input lobes before processing.   Getting outputs requires getting the outputs of individual lobes.

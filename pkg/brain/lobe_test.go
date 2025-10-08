@@ -10,8 +10,8 @@ func TestNewLobe(t *testing.T) {
 	l := NewLobe("foo", 2, 1, nil)
 	assert.NotNil(t, l)
 	assert.Equal(t, "foo", l.Name)
-	assert.Equal(t, 2, l.numInputs)
-	assert.Equal(t, 1, l.numOutputs)
+	assert.Equal(t, 2, l.NumInputs)
+	assert.Equal(t, 1, l.NumOutputs)
 	assert.NotNil(t, l.outputs)
 }
 

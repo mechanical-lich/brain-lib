@@ -10,10 +10,10 @@ import (
 func TestNewBrain(t *testing.T) {
 	b := NewBrain(2, 1)
 	assert.NotNil(t, b)
-	assert.Equal(t, 2, b.numInputs)
-	assert.Equal(t, 1, b.numOutputs)
-	assert.NotNil(t, b.lobes)
-	assert.NotNil(t, b.connections)
+	assert.Equal(t, 2, b.NumInputs)
+	assert.Equal(t, 1, b.NumOutputs)
+	assert.NotNil(t, b.Lobes)
+	assert.NotNil(t, b.Connections)
 }
 
 func TestAddAndGetLobe(t *testing.T) {
@@ -34,8 +34,8 @@ func TestConnectAndThink(t *testing.T) {
 	b.Connect("conn1", BRAIN_INPUT, "testLobe", 0, 0)
 	b.Connect("conn2", "testLobe", BRAIN_OUTPUT, 0, 0)
 
-	slog.Info("Lobes:", "lobes", b.lobes)
-	slog.Info("Connections:", "connections", b.connections)
+	slog.Info("Lobes:", "lobes", b.Lobes)
+	slog.Info("Connections:", "connections", b.Connections)
 
 	// Test the brain thinking process
 	inputs := []float64{1.0, 2.0}
@@ -150,8 +150,8 @@ func TestThinkingWithConnectionsPointedAtSameOutput(t *testing.T) {
 	b.Connect("conn3", "testLobe", BRAIN_OUTPUT, 0, 0)
 	b.Connect("conn4", "testLobe", BRAIN_OUTPUT, 1, 0)
 
-	slog.Info("Lobes:", "lobes", b.lobes)
-	slog.Info("Connections:", "connections", b.connections)
+	slog.Info("Lobes:", "lobes", b.Lobes)
+	slog.Info("Connections:", "connections", b.Connections)
 
 	// Test the brain thinking process
 	inputs := []float64{2.0, 2.0}
@@ -174,8 +174,8 @@ func TestThinkingWithWeightedConnectionsPointedAtSameOutput(t *testing.T) {
 	b.WeightedConnect("conn3", "testLobe", BRAIN_OUTPUT, 0, 0, 0.5)
 	b.WeightedConnect("conn4", "testLobe", BRAIN_OUTPUT, 1, 0, 0.5)
 
-	slog.Info("Lobes:", "lobes", b.lobes)
-	slog.Info("Connections:", "connections", b.connections)
+	slog.Info("Lobes:", "lobes", b.Lobes)
+	slog.Info("Connections:", "connections", b.Connections)
 
 	// Test the brain thinking process
 	inputs := []float64{2.0, 2.0}

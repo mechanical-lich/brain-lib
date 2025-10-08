@@ -6,25 +6,25 @@ import (
 
 type Lobe struct {
 	Name       string
-	numInputs  int
-	numOutputs int
+	NumInputs  int
+	NumOutputs int
 	outputs    []float64
-	ann        *ann.ANN
+	Ann        *ann.ANN
 }
 
-func NewLobe(name string, numInputs int, numOutputs int, ann *ann.ANN) *Lobe {
-	return &Lobe{Name: name, numInputs: numInputs, numOutputs: numOutputs, outputs: make([]float64, numOutputs), ann: ann}
+func NewLobe(name string, NumInputs int, NumOutputs int, ann *ann.ANN) *Lobe {
+	return &Lobe{Name: name, NumInputs: NumInputs, NumOutputs: NumOutputs, outputs: make([]float64, NumOutputs), Ann: ann}
 }
 
 func (l *Lobe) Process(inputs []float64) []float64 {
-	l.outputs = make([]float64, l.numOutputs)
+	l.outputs = make([]float64, l.NumOutputs)
 	// Passthrough lobe
-	if l.ann == nil {
+	if l.Ann == nil {
 		for i := range l.outputs {
 			l.outputs[i] = inputs[i]
 		}
 	} else {
-		l.outputs = l.ann.Process(inputs)
+		l.outputs = l.Ann.Process(inputs)
 	}
 	return l.outputs
 }

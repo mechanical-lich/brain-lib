@@ -7,11 +7,12 @@ import (
 )
 
 type ANN struct {
-	NumInputs  int           `json:"numInputs"`
-	NumOutputs int           `json:"numOutputs"`
-	NumLayers  int           `json:"numLayers"`
-	Weights    [][][]float64 `json:"weights"`
-	Biases     [][]float64   `json:"biases"`
+	NumInputs     int           `json:"numInputs"`
+	NumOutputs    int           `json:"numOutputs"`
+	NumLayers     int           `json:"numLayers"`
+	Weights       [][][]float64 `json:"weights"`
+	Biases        [][]float64   `json:"biases"`
+	CurrentValues [][]float64   `json:"currentValues"`
 }
 
 // Save writes the ANN to a file as JSON
@@ -84,6 +85,11 @@ func relu(x float64) float64 {
 }
 
 func (a *ANN) Process(inputs []float64) []float64 {
+	// Prepare to store current values
+	a.CurrentValues = make([][]float64, a.NumLayers+2) // input + hidden + output
+	a.CurrentValues[0] = make([]float64, len(inputs))
+	copy(a.CurrentValues[0], inputs)
+
 	layerInput := inputs
 	for l := 0; l < a.NumLayers; l++ {
 		next := make([]float64, len(a.Biases[l]))
@@ -94,6 +100,8 @@ func (a *ANN) Process(inputs []float64) []float64 {
 			}
 			next[n] = relu(sum)
 		}
+		a.CurrentValues[l+1] = make([]float64, len(next))
+		copy(a.CurrentValues[l+1], next)
 		layerInput = next
 	}
 	// Output layer (no activation)
@@ -105,6 +113,8 @@ func (a *ANN) Process(inputs []float64) []float64 {
 		}
 		out[n] = sum
 	}
+	a.CurrentValues[a.NumLayers+1] = make([]float64, len(out))
+	copy(a.CurrentValues[a.NumLayers+1], out)
 	return out
 }
 
