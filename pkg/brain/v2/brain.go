@@ -9,17 +9,13 @@ type Brain struct {
 	Lobes       []*Lobe                 `json:"lobes"`
 	lobesLookup map[string]*Lobe        `json:"-"`
 	Connections map[string][]Connection `json:"connections"` // Keyed by lobe name
-	NumInputs   int                     `json:"num_inputs"`
-	NumOutputs  int                     `json:"num_outputs"`
 }
 
-func NewBrain(numInputs int, numOutputs int) *Brain {
+func NewBrain() *Brain {
 	return &Brain{
 		Lobes:       make([]*Lobe, 0),
 		lobesLookup: make(map[string]*Lobe),
 		Connections: make(map[string][]Connection),
-		NumInputs:   numInputs,
-		NumOutputs:  numOutputs,
 	}
 }
 
@@ -68,9 +64,8 @@ func (b *Brain) WeightedConnect(name string, fromLobe string, toLobe string, fro
 	b.Connections[toLobe] = append(b.Connections[toLobe], conn)
 }
 
-func (b *Brain) Think() []float64 {
-	var outputs = make([]float64, b.NumOutputs)
-
+func (b *Brain) Think() {
+	// Loop through lobes, set any missing inputs from connections, then process
 	for _, lobe := range b.Lobes {
 		for _, conn := range b.Connections[lobe.Name] {
 			if fromLobe, exists := b.lobesLookup[conn.FromLobe]; exists {
@@ -83,8 +78,6 @@ func (b *Brain) Think() []float64 {
 
 		lobe.Process()
 	}
-
-	return outputs
 }
 
 func (b *Brain) refreshLookup() {

@@ -8,16 +8,14 @@ import (
 )
 
 func TestNewBrain(t *testing.T) {
-	b := NewBrain(2, 1)
+	b := NewBrain()
 	assert.NotNil(t, b)
-	assert.Equal(t, 2, b.NumInputs)
-	assert.Equal(t, 1, b.NumOutputs)
 	assert.NotNil(t, b.Lobes)
 	assert.NotNil(t, b.Connections)
 }
 
 func TestAddAndGetLobe(t *testing.T) {
-	b := NewBrain(2, 1)
+	b := NewBrain()
 	lobe := NewLobe("testLobe", 2, 1, nil)
 	b.AddLobe(lobe)
 	got := b.GetLobe("testLobe")
@@ -26,7 +24,7 @@ func TestAddAndGetLobe(t *testing.T) {
 }
 
 func TestConnectAndThink(t *testing.T) {
-	b := NewBrain(2, 1)
+	b := NewBrain()
 
 	// Create a test lobe
 	lobe := b.NewLobe("testLobe", 2, 1)
@@ -45,12 +43,12 @@ func TestConnectAndThink(t *testing.T) {
 }
 
 func TestThinkWithMultipleLobes(t *testing.T) {
-	b := NewBrain(4, 4)
+	b := NewBrain()
 
 	// Create lobes
 	lobeA := b.NewLobe("lobe_a", 2, 2)
 	lobeB := b.NewLobe("lobe_b", 2, 2)
-	lobeC := b.NewLobe("lobe_c", 4, 4)
+	lobeC := b.NewLobe("lobe_c", 5, 5)
 
 	// Connect A and B to each side of C's inputs
 	b.Connect("conn1", "lobe_a", "lobe_c", 0, 0)
@@ -65,13 +63,16 @@ func TestThinkWithMultipleLobes(t *testing.T) {
 	lobeA.SetInputs(inputsA)
 	lobeB.SetInputs(inputsB)
 
+	// Set the last input for C
+	lobeC.SetInputs([]float64{0, 0, 0, 0, 5})
+
 	// Think
 	b.Think()
 
 	// Check outputs
 	assert.Len(t, lobeA.Outputs, 2)
 	assert.Len(t, lobeB.Outputs, 2)
-	assert.Len(t, lobeC.Outputs, 4)
+	assert.Len(t, lobeC.Outputs, 5)
 
 	assert.Equal(t, inputsA[0], lobeA.Outputs[0])
 	assert.Equal(t, inputsA[1], lobeA.Outputs[1])
@@ -83,4 +84,5 @@ func TestThinkWithMultipleLobes(t *testing.T) {
 	assert.Equal(t, inputsA[1], lobeC.Outputs[1])
 	assert.Equal(t, inputsB[0], lobeC.Outputs[2])
 	assert.Equal(t, inputsB[1], lobeC.Outputs[3])
+	assert.Equal(t, 5.0, lobeC.Outputs[4])
 }
