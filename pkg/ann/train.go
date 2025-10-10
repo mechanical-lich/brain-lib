@@ -1,6 +1,10 @@
 package ann
 
-import "log/slog"
+import (
+	"encoding/json"
+	"log/slog"
+	"os"
+)
 
 type TrainingExample struct {
 	Inputs  []float64
@@ -32,4 +36,19 @@ func computeLoss(predicted, actual []float64) float64 {
 		sum += diff * diff
 	}
 	return sum / float64(len(predicted))
+}
+
+func SaveTrainingData(filename string, examples []TrainingExample) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	enc := json.NewEncoder(file)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(examples); err != nil {
+		return err
+	}
+	return nil
 }
