@@ -4,6 +4,8 @@ type Synapse struct {
 	ID        string  `json:"id"`
 	From      string  `json:"from"`
 	To        string  `json:"to"`
+	FromLobe  string  `json:"from_lobe"` // only needed for cross-lobe synapses
+	ToLobe    string  `json:"to_lobe"`   // only needed for cross-lobe synapses
 	Weight    float64 `json:"weight"`
 	Plastic   bool    `json:"plastic"`
 	Trace     float64 `json:"trace"`
