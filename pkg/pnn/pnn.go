@@ -6,13 +6,14 @@ import (
 )
 
 type PNN struct {
-	Neurons    map[string]*Neuron    `json:"neurons"`
-	Synapses   map[string]*Synapse   `json:"synapses"`
-	Inputs     map[string]string     `json:"inputs"`  // sensorName -> neuronID
-	Outputs    map[string]string     `json:"outputs"` // motorName -> neuronID
-	Modulators map[string]*Modulator `json:"modulators"`
-	Seed       int64                 `json:"seed"`
-	rng        *rand.Rand
+	Neurons     map[string]*Neuron    `json:"neurons"`
+	updateOrder []string              `json:"-"`
+	Synapses    map[string]*Synapse   `json:"synapses"`
+	Inputs      map[string]string     `json:"inputs"`  // sensorName -> neuronID
+	Outputs     map[string]string     `json:"outputs"` // motorName -> neuronID
+	Modulators  map[string]*Modulator `json:"modulators"`
+	Seed        int64                 `json:"seed"`
+	rng         *rand.Rand
 }
 
 func NewPNN(seed int64) *PNN {
