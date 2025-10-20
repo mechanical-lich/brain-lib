@@ -53,7 +53,7 @@ func TestBrainTwoLobeFeedForward(t *testing.T) {
 	br.AddLobe(l2)
 	br.Connect("L1", "in", "L2", "mid", 0.5, false)
 	// intra-lobe connection should be added directly to the lobe (no Brain mirroring)
-	l2.Connect("mid", "out", 0.5, false)
+	br.Connect("L2", "mid", "L2", "out", 0.5, false)
 
 	// step should run lobes in topological order and propagate activation
 	br.Step(0.1)

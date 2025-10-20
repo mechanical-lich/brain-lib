@@ -62,8 +62,14 @@ func (b *Brain) GetLobe(name string) *Lobe {
 }
 
 func (b *Brain) AddSynapse(synapse *Synapse) {
-	b.Synapses[synapse.ID] = synapse
-
+	// If this is an intra-lobe synapse, also add it to the lobe's synapse map
+	if synapse.FromLobe != "" && synapse.FromLobe == synapse.ToLobe {
+		if l, ok := b.Lobes[synapse.FromLobe]; ok {
+			l.AddSynapse(synapse)
+		}
+	} else {
+		b.Synapses[synapse.ID] = synapse
+	}
 	b.updateLobeOrder()
 }
 

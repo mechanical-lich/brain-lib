@@ -31,16 +31,20 @@ type Neuron struct {
 	Activation    ActivationFunc `json:"activation"`
 	ActivationVal float64        `json:"activation_val"`
 	ExternalInput float64        `json:"external_lobe_input"`
-	Incoming      []string       `json:"incoming"` // synapse IDs
-	Outgoing      []string       `json:"outgoing"` // synapse IDs (optional)
 	LearningRate  float64        `json:"learning_rate"`
+	DecayRate     float64        `json:"decay_rate"`
 }
 
 func (n *Neuron) Compute(sum float64) float64 {
 	v := sum + n.Bias + n.ExternalInput
 	out := applyActivation(n.Activation, v)
-	n.ActivationVal = out
+
+	if n.ActivationVal < out {
+		n.ActivationVal = out
+	}
+
+	n.ActivationVal -= n.ActivationVal * n.DecayRate
 
 	n.ExternalInput = 0.0 // reset after use
-	return out
+	return n.ActivationVal
 }

@@ -1,13 +1,15 @@
 package brain
 
 type Lobe struct {
-	Name string `json:"name"`
+	Neurons     map[string]*Neuron  `json:"neurons"`
+	updateOrder []string            `json:"-"`
+	Synapses    map[string]*Synapse `json:"synapses"`
 
-	Modulators  map[string]*Modulator `json:"modulators"`
-	Neurons     map[string]*Neuron    `json:"neurons"`
-	updateOrder []string              `json:"-"`
-
-	Synapses map[string]*Synapse `json:"synapses"`
+	// Lobe level settings
+	Name       string                `json:"name"`
+	Modulators map[string]*Modulator `json:"modulators"`
+	Persists   bool                  `json:"persists"`   // Neurons retain activation between steps if true
+	DecayRate  float64               `json:"decay_rate"` // global decay rate applied to all neurons each step
 }
 
 func NewLobe(name string, modulators map[string]*Modulator) *Lobe {
@@ -74,7 +76,7 @@ func (l *Lobe) RemoveSynapse(id string) {
 
 func (l *Lobe) SetNeuronInput(id string, value float64) {
 	if neuron, ok := l.Neurons[id]; ok {
-		neuron.ActivationVal = value
+		neuron.ExternalInput = value
 	}
 }
 
@@ -110,6 +112,12 @@ func (l *Lobe) Step(dt float64) {
 		if !ok {
 			continue
 		}
+
+		// Wipe the neuron if the lobe doesn't persist between steps
+		if !l.Persists {
+			neuron.ActivationVal = 0.0
+		}
+
 		// Sum inputs from all synapses that target this neuron
 		sum := 0.0
 		for _, s := range l.Synapses {
@@ -122,6 +130,9 @@ func (l *Lobe) Step(dt float64) {
 		}
 		// Compute neuron's new activation value (includes bias and activation func)
 		neuron.Compute(sum)
+
+		// Lobe level decay if configured
+		neuron.ActivationVal -= neuron.ActivationVal * l.DecayRate
 	}
 
 	// apply plasticity: simple Hebbian scaled by a modulator (e.g., dopamine)
