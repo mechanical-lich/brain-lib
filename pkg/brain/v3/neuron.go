@@ -33,16 +33,19 @@ type Neuron struct {
 	ExternalInput float64        `json:"external_lobe_input"`
 	LearningRate  float64        `json:"learning_rate"`
 	DecayRate     float64        `json:"decay_rate"`
+	Threshold     float64        `json:"threshold"` // Optional threshold value, activationVal must be this high otherwise it is 0.0
+	// Whether this neuron persists its activation between steps (overrides lobe-level persists if needed)
+	Persists bool `json:"persists,omitempty"`
 	// Optional visual position for editor/UI
-	X             float64        `json:"x,omitempty"`
-	Y             float64        `json:"y,omitempty"`
+	X float64 `json:"x,omitempty"`
+	Y float64 `json:"y,omitempty"`
 }
 
 func (n *Neuron) Compute(sum float64) float64 {
 	v := sum + n.Bias + n.ExternalInput
 	out := applyActivation(n.Activation, v)
 
-	if n.ActivationVal < out {
+	if n.ActivationVal < out && out > n.Threshold {
 		n.ActivationVal = out
 	}
 

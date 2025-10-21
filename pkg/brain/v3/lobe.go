@@ -11,8 +11,8 @@ type Lobe struct {
 	Persists   bool                  `json:"persists"`   // Neurons retain activation between steps if true
 	DecayRate  float64               `json:"decay_rate"` // global decay rate applied to all neurons each step
 	// Optional visual position for editor/UI
-	X          float64               `json:"x,omitempty"`
-	Y          float64               `json:"y,omitempty"`
+	X float64 `json:"x,omitempty"`
+	Y float64 `json:"y,omitempty"`
 }
 
 func NewLobe(name string, modulators map[string]*Modulator) *Lobe {
@@ -117,7 +117,7 @@ func (l *Lobe) Step(dt float64) {
 		}
 
 		// Wipe the neuron if the lobe doesn't persist between steps
-		if !l.Persists {
+		if !l.Persists && !neuron.Persists {
 			neuron.ActivationVal = 0.0
 		}
 
