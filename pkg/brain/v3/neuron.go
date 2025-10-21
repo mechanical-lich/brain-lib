@@ -33,6 +33,9 @@ type Neuron struct {
 	ExternalInput float64        `json:"external_lobe_input"`
 	LearningRate  float64        `json:"learning_rate"`
 	DecayRate     float64        `json:"decay_rate"`
+	// Optional visual position for editor/UI
+	X             float64        `json:"x,omitempty"`
+	Y             float64        `json:"y,omitempty"`
 }
 
 func (n *Neuron) Compute(sum float64) float64 {

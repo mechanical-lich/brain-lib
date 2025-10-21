@@ -10,6 +10,9 @@ type Lobe struct {
 	Modulators map[string]*Modulator `json:"modulators"`
 	Persists   bool                  `json:"persists"`   // Neurons retain activation between steps if true
 	DecayRate  float64               `json:"decay_rate"` // global decay rate applied to all neurons each step
+	// Optional visual position for editor/UI
+	X          float64               `json:"x,omitempty"`
+	Y          float64               `json:"y,omitempty"`
 }
 
 func NewLobe(name string, modulators map[string]*Modulator) *Lobe {
