@@ -37,8 +37,9 @@ type Neuron struct {
 	// Whether this neuron persists its activation between steps (overrides lobe-level persists if needed)
 	Persists bool `json:"persists,omitempty"`
 	// Optional visual position for editor/UI
-	X float64 `json:"x,omitempty"`
-	Y float64 `json:"y,omitempty"`
+	X      float64 `json:"x,omitempty"`
+	Y      float64 `json:"y,omitempty"`
+	Hidden bool    `json:"hidden,omitempty"`
 }
 
 func (n *Neuron) Compute(sum float64) float64 {
@@ -52,5 +53,6 @@ func (n *Neuron) Compute(sum float64) float64 {
 	n.ActivationVal -= n.ActivationVal * n.DecayRate
 
 	n.ExternalInput = 0.0 // reset after use
+
 	return n.ActivationVal
 }

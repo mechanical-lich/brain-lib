@@ -1,5 +1,10 @@
 package brain
 
+import (
+	"encoding/json"
+	"os"
+)
+
 type Brain struct {
 	Lobes       map[string]*Lobe    `json:"lobes"`
 	updateOrder []string            `json:"-"`
@@ -82,6 +87,12 @@ func (b *Brain) GetSynapse(id string) *Synapse {
 
 func (b *Brain) RemoveSynapse(id string) {
 	delete(b.Synapses, id)
+	// Also remove from lobe if it's an intra-lobe synapse
+	for _, lobe := range b.Lobes {
+		if _, ok := lobe.Synapses[id]; ok {
+			lobe.RemoveSynapse(id)
+		}
+	}
 	b.updateLobeOrder()
 }
 
@@ -133,4 +144,45 @@ func (b *Brain) updateLobeOrder() {
 		order[i], order[j] = order[j], order[i]
 	}
 	b.updateOrder = order
+}
+
+func LoadFromJson(data []byte) (*Brain, error) {
+	var brain Brain
+	if err := json.Unmarshal(data, &brain); err != nil {
+		return nil, err
+	}
+
+	// Initialize maps if nil
+	if brain.Lobes == nil {
+		brain.Lobes = make(map[string]*Lobe)
+	}
+	if brain.Synapses == nil {
+		brain.Synapses = make(map[string]*Synapse)
+	}
+
+	brain.updateLobeOrder()
+	for _, lobe := range brain.Lobes {
+		lobe.updateNeuronOrder()
+	}
+	return &brain, nil
+}
+
+func LoadBrain(filePath string) (*Brain, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return LoadFromJson(data)
+}
+
+func (b *Brain) Save(filePath string) error {
+	data, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filePath, data, 0644)
+}
+
+func (b *Brain) ToJSON() ([]byte, error) {
+	return json.MarshalIndent(b, "", "  ")
 }
