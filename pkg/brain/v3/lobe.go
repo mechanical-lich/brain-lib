@@ -6,10 +6,11 @@ type Lobe struct {
 	Synapses    map[string]*Synapse `json:"synapses"`
 
 	// Lobe level settings
-	Name       string                `json:"name"`
-	Modulators map[string]*Modulator `json:"modulators"`
-	Persists   bool                  `json:"persists"`   // Neurons retain activation between steps if true
-	DecayRate  float64               `json:"decay_rate"` // global decay rate applied to all neurons each step
+	Name              string                `json:"name"`
+	Modulators        map[string]*Modulator `json:"modulators"`
+	Persists          bool                  `json:"persists"`   // Neurons retain activation between steps if true
+	DecayRate         float64               `json:"decay_rate"` // global decay rate applied to all neurons each step
+	ChemicalReceptors []*ChemicalReceptor   `json:"chemical_receptors"`
 	// Optional visual position for editor/UI
 	X float64 `json:"x,omitempty"`
 	Y float64 `json:"y,omitempty"`
@@ -104,7 +105,83 @@ func (l *Lobe) Connect(fromID, toID string, weight float64, plastic bool) *Synap
 	return synapse
 }
 
+func (l *Lobe) AddReceptor(chemicalName string, uptakeRate float64, target string, targetType TargetType, receptorType ReceptorType) {
+	receptor := &ChemicalReceptor{
+		ChemicalName: chemicalName,
+		UptakeRate:   uptakeRate,
+		Target:       target,
+		TargetType:   targetType,
+		ReceptorType: receptorType,
+	}
+	l.ChemicalReceptors = append(l.ChemicalReceptors, receptor)
+}
+
+func (l *Lobe) ApplyChemical(chemicalName string, concentration float64) float64 {
+	for _, receptor := range l.ChemicalReceptors {
+		if receptor.ChemicalName == chemicalName {
+			amount := concentration * receptor.UptakeRate
+			switch receptor.TargetType {
+			case TargetTypeNeuron:
+				if neuron, ok := l.Neurons[receptor.Target]; ok {
+					if receptor.ReceptorType == ReceptorTypeInhibitory {
+						neuron.ExternalInput -= amount
+					} else {
+						neuron.ExternalInput += amount
+					}
+					return concentration - amount
+				}
+			case TargetTypeModulator:
+				if modulator, ok := l.Modulators[receptor.Target]; ok {
+					if receptor.ReceptorType == ReceptorTypeInhibitory {
+						modulator.Level -= amount
+					} else {
+						modulator.Level += amount
+					}
+					return concentration - amount
+				}
+			}
+		}
+	}
+	return concentration
+}
+
+// Applies all the chemicals in the map that it can and returns an updated map with the remaining concentrations
+func (l *Lobe) UpdateChemicalReceptors(dt float64, chemicals map[string]float64) map[string]float64 {
+	// Apply chemical receptors
+	for _, receptor := range l.ChemicalReceptors {
+		conc, ok := chemicals[receptor.ChemicalName]
+		if !ok || conc <= 0.0 {
+			continue
+		}
+		amount := conc * receptor.UptakeRate * dt
+
+		switch receptor.TargetType {
+		case TargetTypeNeuron:
+			if neuron, ok := l.Neurons[receptor.Target]; ok {
+				if receptor.ReceptorType == ReceptorTypeInhibitory {
+					neuron.ExternalInput -= amount
+				} else {
+					neuron.ExternalInput += amount
+				}
+				chemicals[receptor.ChemicalName] -= amount
+			}
+		case TargetTypeModulator:
+			if modulator, ok := l.Modulators[receptor.Target]; ok {
+				if receptor.ReceptorType == ReceptorTypeInhibitory {
+					modulator.Level -= amount
+				} else {
+					modulator.Level += amount
+				}
+				chemicals[receptor.ChemicalName] -= amount
+			}
+		}
+	}
+
+	return chemicals
+}
+
 func (l *Lobe) Step(dt float64) {
+	// Update modulators
 	for _, m := range l.Modulators {
 		m.Step(dt)
 	}

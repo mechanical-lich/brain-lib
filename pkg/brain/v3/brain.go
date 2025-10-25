@@ -19,6 +19,13 @@ func NewBrain() *Brain {
 	return b
 }
 
+func (b *Brain) ApplyChemistry(chemicals map[string]float64, dt float64) map[string]float64 {
+	for _, lobe := range b.Lobes {
+		chemicals = lobe.UpdateChemicalReceptors(dt, chemicals)
+	}
+	return chemicals
+}
+
 func (b *Brain) Step(dt float64) {
 	// Single-pass: for each lobe in topological order, inject external inputs from
 	// already-stepped source lobes (via cross-lobe synapses) then step the lobe once.

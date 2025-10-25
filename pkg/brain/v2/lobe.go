@@ -1,6 +1,10 @@
 package brain
 
-import "github.com/mechanical-lich/brain-lib/pkg/ann"
+import (
+	"fmt"
+
+	"github.com/mechanical-lich/brain-lib/pkg/ann"
+)
 
 type Lobe struct {
 	Name         string    `json:"name"`
@@ -16,11 +20,11 @@ type Lobe struct {
 func NewLobe(name string, NumInputs int, NumOutputs int, ann *ann.ANN) *Lobe {
 	inputLabels := make([]string, NumInputs)
 	for i := range inputLabels {
-		inputLabels[i] = "input" + string('A'+i)
+		inputLabels[i] = fmt.Sprintf("input%c", 'A'+rune(i))
 	}
 	outputLabels := make([]string, NumOutputs)
 	for i := range outputLabels {
-		outputLabels[i] = "output" + string('A'+i)
+		outputLabels[i] = fmt.Sprintf("output%c", 'A'+rune(i))
 	}
 	return &Lobe{
 		Name:         name,
