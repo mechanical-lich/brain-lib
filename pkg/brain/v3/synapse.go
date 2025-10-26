@@ -11,6 +11,13 @@ type Synapse struct {
 	Trace     float64 `json:"trace"`
 	MinWeight float64 `json:"min_weight"`
 	MaxWeight float64 `json:"max_weight"`
+	// Structural/usage stats
+	LastUsed      int     `json:"last_used"`
+	UsageCount    int     `json:"usage_count"`
+	Eligibility   float64 `json:"eligibility"`
+	Age           int     `json:"age"`
+	Consolidation float64 `json:"consolidation"`
+	Cooldown      int     `json:"cooldown"`
 }
 
 func (s *Synapse) Clip() {

@@ -180,7 +180,7 @@ func (l *Lobe) UpdateChemicalReceptors(dt float64, chemicals map[string]float64)
 	return chemicals
 }
 
-func (l *Lobe) Step(dt float64) {
+func (l *Lobe) Step(dt float64, now int) {
 	// Update modulators
 	for _, m := range l.Modulators {
 		m.Step(dt)
@@ -205,7 +205,14 @@ func (l *Lobe) Step(dt float64) {
 				continue
 			}
 			if pre, ok := l.Neurons[s.From]; ok {
-				sum += pre.ActivationVal * s.Weight
+				mult := pre.ActivationVal * s.Weight
+				sum += mult
+				// mark synapse as used if presynaptic activity contributed
+				if mult != 0.0 {
+					s.LastUsed = now
+					s.UsageCount++
+					s.Eligibility = 1.0
+				}
 			}
 		}
 		// Compute neuron's new activation value (includes bias and activation func)
@@ -239,6 +246,14 @@ func (l *Lobe) Step(dt float64) {
 		s.Weight += delta
 		s.Clip()
 		_ = sid
+		// decay eligibility if not refreshed, age and cooldown management
+		if s.Eligibility > 0 {
+			s.Eligibility *= 0.995
+		}
+		s.Age++
+		if s.Cooldown > 0 {
+			s.Cooldown--
+		}
 	}
 }
 

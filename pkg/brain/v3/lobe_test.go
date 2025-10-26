@@ -75,7 +75,7 @@ func TestStepPropagation(t *testing.T) {
 	l.Connect("B", "C", 0.5, false)
 
 	// Run one step
-	l.Step(0.1)
+	l.Step(0.1, 0)
 
 	// After step: A should be 1.0 (from bias), B should be 0.5, C should be 0.25
 	assert.InDelta(t, 1.0, l.GetNeuron("A").ActivationVal, 1e-6)
@@ -101,7 +101,7 @@ func TestPlasticityHebbian(t *testing.T) {
 	}
 
 	// Run a step which should apply plasticity and increase weight
-	l.Step(0.1)
+	l.Step(0.1, 0)
 
 	after := l.GetSynapse(syn.ID).Weight
 	assert.Greater(t, after, 0.1, "expected synapse weight to increase due to Hebbian plasticity")
