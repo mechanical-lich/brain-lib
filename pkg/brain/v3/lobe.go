@@ -5,7 +5,7 @@ type PlasticityConfig struct {
 	TraceDecay         float64 `json:"trace_decay"`          // How fast eligibility traces fade (default 0.9)
 	RewardLearningRate float64 `json:"reward_learning_rate"` // Learning rate for rewards (default 0.1)
 	PunishLearningRate float64 `json:"punish_learning_rate"` // Learning rate for punishment (default 0.15)
-	InactivityDecay    float64 `json:"inactivity_decay"`     // Background forgetting rate (default 0.001)
+	InactivityDecay    float64 `json:"inactivity_decay"`     // Rate weights return to baseline when unused (default 0.00001)
 }
 
 // DefaultPlasticityConfig returns sensible defaults for creature learning
@@ -120,8 +120,8 @@ func (l *Lobe) Connect(fromID, toID string, weight float64, plastic bool) *Synap
 		Plastic:      plastic,
 		MinWeight:    -2.0,
 		MaxWeight:    2.0,
-		InitWeight:   weight,
-		MinDecayFrac: 0.1, // Can decay to 10% of initial weight
+		InitWeight:   weight, // Store baseline weight for decay
+		MinDecayFrac: 0.1,    // Kept for backward compatibility
 	}
 	l.AddSynapse(synapse)
 	return synapse
@@ -304,34 +304,15 @@ func (l *Lobe) applyInactivityDecay(dt float64, now int) {
 
 		inactivitySteps := now - s.LastUsed
 		if inactivitySteps > 0 {
-			// Exponential decay toward zero but respect minimum fraction
-			decayFactor := 1.0 - l.PlasticityConfig.InactivityDecay
-			if decayFactor > 0 && decayFactor < 1 {
-				t := dt * float64(inactivitySteps)
-				factor := 1.0
-				for i := 0; i < int(t); i++ {
-					factor *= decayFactor
-				}
+			// Decay toward initial weight (baseline), not toward zero
+			// This preserves learned behaviors while allowing unused modifications to fade
+			decayRate := l.PlasticityConfig.InactivityDecay * dt
+			
+			// Move weight toward InitWeight by decay rate
+			delta := s.InitWeight - s.Weight
+			s.Weight += delta * decayRate
 
-				s.Weight *= factor
-
-				// Enforce minimum magnitude relative to initial weight
-				if s.InitWeight != 0 && s.MinDecayFrac > 0 {
-					minMag := s.InitWeight * s.MinDecayFrac
-					if s.InitWeight < 0 {
-						minMag = -minMag
-					}
-
-					// Don't let weight decay below minimum fraction
-					if s.InitWeight > 0 && s.Weight < minMag {
-						s.Weight = minMag
-					} else if s.InitWeight < 0 && s.Weight > minMag {
-						s.Weight = minMag
-					}
-				}
-
-				s.Clip()
-			}
+			s.Clip()
 		}
 	}
 }
