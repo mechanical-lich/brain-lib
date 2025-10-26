@@ -84,7 +84,7 @@ func TestStepPropagation(t *testing.T) {
 }
 
 func TestPlasticityHebbian(t *testing.T) {
-	l := NewLobe("plastic", map[string]*Modulator{Dopamine: {Name: Dopamine, Level: 1.0, DecayRate: 1.0}})
+	l := NewLobe("plastic", nil)
 
 	// Create neurons pre and post
 	pre := &Neuron{ID: "pre", Bias: 1.0, Activation: ActLinear}
@@ -95,14 +95,50 @@ func TestPlasticityHebbian(t *testing.T) {
 	// Connect pre->post with small initial weight and plastic enabled
 	syn := l.Connect("pre", "post", 0.1, true)
 
-	// Ensure modulator present
-	if _, ok := l.Modulators[Dopamine]; !ok {
-		t.Fatalf("dopamine modulator missing")
-	}
-
-	// Run a step which should apply plasticity and increase weight
+	// Run one step to build eligibility trace
 	l.Step(0.1, 0)
 
+	// Apply reward and run another step
+	l.Reinforce(Dopamine, 1.0)
+	l.Step(0.1, 1)
+
 	after := l.GetSynapse(syn.ID).Weight
-	assert.Greater(t, after, 0.1, "expected synapse weight to increase due to Hebbian plasticity")
+	assert.Greater(t, after, 0.1, "expected synapse weight to increase due to reinforcement plasticity")
+}
+
+func TestPlasticityPunishment(t *testing.T) {
+	l := NewLobe("plastic", nil)
+
+	// Create neurons pre and post
+	pre := &Neuron{ID: "pre", Bias: 1.0, Activation: ActLinear}
+	post := &Neuron{ID: "post", Bias: 0.0, Activation: ActLinear}
+	l.AddNeuron(pre)
+	l.AddNeuron(post)
+
+	// Connect pre->post with initial weight
+	syn := l.Connect("pre", "post", 0.5, true)
+
+	// Run one step to build eligibility trace
+	l.Step(0.1, 0)
+
+	// Apply punishment (serotonin) and run another step
+	l.Reinforce(Serotonin, 1.0)
+	l.Step(0.1, 1)
+
+	after := l.GetSynapse(syn.ID).Weight
+	assert.Less(t, after, 0.5, "expected synapse weight to decrease due to punishment")
+}
+
+func TestPlasticityConfig(t *testing.T) {
+	l := NewLobe("plastic", nil)
+
+	// Check default config is set
+	assert.Equal(t, 0.90, l.PlasticityConfig.TraceDecay)
+	assert.Equal(t, 0.10, l.PlasticityConfig.RewardLearningRate)
+	assert.Equal(t, 0.15, l.PlasticityConfig.PunishLearningRate)
+	assert.Equal(t, 0.00001, l.PlasticityConfig.InactivityDecay)
+
+	// Test custom config
+	l.PlasticityConfig.RewardLearningRate = 0.5
+	assert.Equal(t, 0.5, l.PlasticityConfig.RewardLearningRate)
 }

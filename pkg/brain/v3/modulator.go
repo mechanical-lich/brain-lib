@@ -1,6 +1,11 @@
 package brain
 
-const Dopamine = "dopamine"
+const (
+	Dopamine      = "dopamine"      // Reward/pleasure signal
+	Serotonin     = "serotonin"     // Punishment/pain signal
+	Endorphin     = "endorphin"     // Wellbeing/satisfaction
+	Acetylcholine = "acetylcholine" // Attention/focus
+)
 
 type Modulator struct {
 	Name      string  `json:"name"`

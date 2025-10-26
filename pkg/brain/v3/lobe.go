@@ -1,5 +1,23 @@
 package brain
 
+// PlasticityConfig controls learning parameters for a lobe
+type PlasticityConfig struct {
+	TraceDecay         float64 `json:"trace_decay"`          // How fast eligibility traces fade (default 0.9)
+	RewardLearningRate float64 `json:"reward_learning_rate"` // Learning rate for rewards (default 0.1)
+	PunishLearningRate float64 `json:"punish_learning_rate"` // Learning rate for punishment (default 0.15)
+	InactivityDecay    float64 `json:"inactivity_decay"`     // Background forgetting rate (default 0.001)
+}
+
+// DefaultPlasticityConfig returns sensible defaults for creature learning
+func DefaultPlasticityConfig() PlasticityConfig {
+	return PlasticityConfig{
+		TraceDecay:         0.90,
+		RewardLearningRate: 0.10,
+		PunishLearningRate: 0.15,
+		InactivityDecay:    0.00001,
+	}
+}
+
 type Lobe struct {
 	Neurons     map[string]*Neuron  `json:"neurons"`
 	updateOrder []string            `json:"-"`
@@ -11,6 +29,7 @@ type Lobe struct {
 	Persists          bool                  `json:"persists"`   // Neurons retain activation between steps if true
 	DecayRate         float64               `json:"decay_rate"` // global decay rate applied to all neurons each step
 	ChemicalReceptors []*ChemicalReceptor   `json:"chemical_receptors"`
+	PlasticityConfig  PlasticityConfig      `json:"plasticity_config"` // Learning parameters
 	// Optional visual position for editor/UI
 	X float64 `json:"x,omitempty"`
 	Y float64 `json:"y,omitempty"`
@@ -22,8 +41,9 @@ func NewLobe(name string, modulators map[string]*Modulator) *Lobe {
 	}
 
 	return &Lobe{
-		Name:       name,
-		Modulators: modulators,
+		Name:             name,
+		Modulators:       modulators,
+		PlasticityConfig: DefaultPlasticityConfig(),
 	}
 }
 
@@ -93,13 +113,15 @@ func (l *Lobe) GetNeuronOutput(id string) float64 {
 
 func (l *Lobe) Connect(fromID, toID string, weight float64, plastic bool) *Synapse {
 	synapse := &Synapse{
-		ID:        fromID + "->" + toID,
-		From:      fromID,
-		To:        toID,
-		Weight:    weight,
-		Plastic:   plastic,
-		MinWeight: -1.0,
-		MaxWeight: 1.0,
+		ID:           fromID + "->" + toID,
+		From:         fromID,
+		To:           toID,
+		Weight:       weight,
+		Plastic:      plastic,
+		MinWeight:    -2.0,
+		MaxWeight:    2.0,
+		InitWeight:   weight,
+		MinDecayFrac: 0.1, // Can decay to 10% of initial weight
 	}
 	l.AddSynapse(synapse)
 	return synapse
@@ -219,32 +241,98 @@ func (l *Lobe) Step(dt float64, now int) {
 
 		// Lobe level decay if configured
 		neuron.ActivationVal -= neuron.ActivationVal * l.DecayRate
+
+		// Update eligibility traces for plastic synapses targeting this neuron
+		// Use presynaptic activation (already updated in topological order) and
+		// postsynaptic activation we just computed
+		for _, s := range l.Synapses {
+			if s.To != nid || !s.Plastic {
+				continue
+			}
+			if pre, ok := l.Neurons[s.From]; ok {
+				// Decaying eligibility trace captures pre-post correlation
+				s.Trace = l.PlasticityConfig.TraceDecay*s.Trace + pre.ActivationVal*neuron.ActivationVal
+			}
+		}
 	}
 
-	// apply plasticity: simple Hebbian scaled by a modulator (e.g., dopamine)
-	modLevel := 1.0
+	// Apply multi-modal reinforcement learning
+	l.applyReinforcementLearning()
+
+	// Apply inactivity-based synaptic decay
+	l.applyInactivityDecay(dt, now)
+}
+
+// applyReinforcementLearning applies reward and punishment signals to plastic synapses
+func (l *Lobe) applyReinforcementLearning() {
+	// Get current chemical levels
+	dopamineLevel := 0.0
+	serotoninLevel := 0.0
+
 	if d, ok := l.Modulators[Dopamine]; ok {
-		modLevel += d.Level
+		dopamineLevel = d.Level
+	}
+	if s, ok := l.Modulators[Serotonin]; ok {
+		serotoninLevel = s.Level
 	}
 
-	for sid, s := range l.Synapses {
+	// Apply reinforcement to each plastic synapse
+	for _, s := range l.Synapses {
 		if !s.Plastic {
 			continue
 		}
-		pre := 0.0
-		post := 0.0
-		if from, ok := l.Neurons[s.From]; ok {
-			pre = from.ActivationVal
-		}
-		if to, ok := l.Neurons[s.To]; ok {
-			post = to.ActivationVal
-		}
-		// eligibility trace
-		s.Trace = 0.9*s.Trace + pre*post
-		delta := s.Trace * (s.Weight) * 0.1 * modLevel
-		s.Weight += delta
+
+		// Reward strengthens active pathways (positive reinforcement)
+		rewardDelta := s.Trace * l.PlasticityConfig.RewardLearningRate * dopamineLevel
+
+		// Punishment weakens active pathways (negative reinforcement)
+		punishDelta := -s.Trace * l.PlasticityConfig.PunishLearningRate * serotoninLevel
+
+		// Apply combined update
+		s.Weight += rewardDelta + punishDelta
+
 		s.Clip()
-		_ = sid
+	}
+}
+
+// applyInactivityDecay implements synaptic homeostasis - unused synapses decay toward baseline
+func (l *Lobe) applyInactivityDecay(dt float64, now int) {
+	for _, s := range l.Synapses {
+		if !s.Plastic {
+			continue
+		}
+
+		inactivitySteps := now - s.LastUsed
+		if inactivitySteps > 0 {
+			// Exponential decay toward zero but respect minimum fraction
+			decayFactor := 1.0 - l.PlasticityConfig.InactivityDecay
+			if decayFactor > 0 && decayFactor < 1 {
+				t := dt * float64(inactivitySteps)
+				factor := 1.0
+				for i := 0; i < int(t); i++ {
+					factor *= decayFactor
+				}
+
+				s.Weight *= factor
+
+				// Enforce minimum magnitude relative to initial weight
+				if s.InitWeight != 0 && s.MinDecayFrac > 0 {
+					minMag := s.InitWeight * s.MinDecayFrac
+					if s.InitWeight < 0 {
+						minMag = -minMag
+					}
+
+					// Don't let weight decay below minimum fraction
+					if s.InitWeight > 0 && s.Weight < minMag {
+						s.Weight = minMag
+					} else if s.InitWeight < 0 && s.Weight > minMag {
+						s.Weight = minMag
+					}
+				}
+
+				s.Clip()
+			}
+		}
 	}
 }
 
@@ -268,4 +356,39 @@ func (l *Lobe) updateNeuronOrder() {
 	for nid := range l.Neurons {
 		visit(nid)
 	}
+}
+
+// Reinforce applies a reinforcement signal to a specified chemical modulator.
+// Use this to trigger learning from game events:
+//   - Positive amounts for rewards (use Dopamine)
+//   - Negative amounts or positive punishment signals (use Serotonin)
+//
+// Example usage:
+//
+//	critter.Brain.GetLobe("decision").Reinforce(Dopamine, 1.0)  // Reward
+//	critter.Brain.GetLobe("decision").Reinforce(Serotonin, 0.5) // Punishment
+func (l *Lobe) Reinforce(chemicalName string, amount float64) {
+	if l.Modulators == nil {
+		l.Modulators = make(map[string]*Modulator)
+	}
+
+	m, ok := l.Modulators[chemicalName]
+	if !ok {
+		// Create modulator if it doesn't exist with sensible defaults
+		decayRate := 0.5 // Medium decay by default
+		if chemicalName == Serotonin {
+			decayRate = 0.3 // Pain/punishment lingers longer
+		} else if chemicalName == Endorphin {
+			decayRate = 0.8 // Satisfaction fades quickly
+		}
+
+		m = &Modulator{
+			Name:      chemicalName,
+			Level:     0.0,
+			DecayRate: decayRate,
+		}
+		l.Modulators[chemicalName] = m
+	}
+
+	m.Level += amount
 }
