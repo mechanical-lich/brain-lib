@@ -211,7 +211,6 @@ func (l *Lobe) Step(dt float64, now int) {
 				if mult != 0.0 {
 					s.LastUsed = now
 					s.UsageCount++
-					s.Eligibility = 1.0
 				}
 			}
 		}
@@ -246,14 +245,6 @@ func (l *Lobe) Step(dt float64, now int) {
 		s.Weight += delta
 		s.Clip()
 		_ = sid
-		// decay eligibility if not refreshed, age and cooldown management
-		if s.Eligibility > 0 {
-			s.Eligibility *= 0.995
-		}
-		s.Age++
-		if s.Cooldown > 0 {
-			s.Cooldown--
-		}
 	}
 }
 

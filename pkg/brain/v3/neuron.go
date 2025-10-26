@@ -40,8 +40,7 @@ type Neuron struct {
 	X      float64 `json:"x,omitempty"`
 	Y      float64 `json:"y,omitempty"`
 	Hidden bool    `json:"hidden,omitempty"`
-	// RecentActivity is an exponentially-decaying trace of recent activation
-	RecentActivity float64 `json:"recent_activity,omitempty"`
+
 	// GroupID is an integer group identifier (0 = no-group). Used to constrain rewiring targets.
 	GroupID int `json:"group_id,omitempty"`
 }
@@ -55,9 +54,6 @@ func (n *Neuron) Compute(sum float64) float64 {
 	}
 
 	n.ActivationVal -= n.ActivationVal * n.DecayRate
-
-	// update recent activity trace
-	n.RecentActivity = 0.9*n.RecentActivity + n.ActivationVal
 
 	n.ExternalInput = 0.0 // reset after use
 
