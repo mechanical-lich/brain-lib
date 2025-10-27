@@ -307,7 +307,7 @@ func (l *Lobe) applyInactivityDecay(dt float64, now int) {
 			// Decay toward initial weight (baseline), not toward zero
 			// This preserves learned behaviors while allowing unused modifications to fade
 			decayRate := l.PlasticityConfig.InactivityDecay * dt
-			
+
 			// Move weight toward InitWeight by decay rate
 			delta := s.InitWeight - s.Weight
 			s.Weight += delta * decayRate
