@@ -238,26 +238,26 @@ func (b *Brain) AddReceptor(chemicalName string, uptakeRate float64, target stri
 // This can be used to have chemicals affect brain-level modulators or specific neurons across lobes
 func (b *Brain) UpdateChemicalReceptors(dt float64, chemicals map[string]float64) {
 	for _, receptor := range b.ChemicalReceptors {
-		conc, ok := chemicals[receptor.ChemicalName]
-		if !ok || conc <= 0.0 {
+		out, consumed := receptor.GetOutput(chemicals, dt)
+		if out == 0.0 {
 			continue
 		}
-		amount := conc * receptor.UptakeRate * dt
 
+		applied := false
 		switch receptor.TargetType {
 		case TargetTypeModulator:
 			// Brain-level modulator
 			if modulator, ok := b.Modulators[receptor.Target]; ok {
-				if receptor.ReceptorType == ReceptorTypeInhibitory {
-					modulator.Level -= amount
-				} else {
-					modulator.Level += amount
-				}
-				chemicals[receptor.ChemicalName] -= amount
+				modulator.Level += out
+				applied = true
 			}
 		case TargetTypeNeuron:
 			// Could target neurons in specific lobes by parsing target as "lobeName.neuronID"
 			// For now, skip neuron targeting at brain level (handled by lobes)
+		}
+
+		if applied {
+			chemicals[receptor.ChemicalName] -= consumed
 		}
 	}
 

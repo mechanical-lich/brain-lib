@@ -76,3 +76,61 @@ func TestUpdateChemicalReceptors_and_BrainIntegration(t *testing.T) {
 	assert.InDelta(t, 0.6, lm.Modulators["m"].Level, 1e-9)
 	assert.InDelta(t, 0.5, updatedMod["sugar"], 1e-9)
 }
+
+func TestChemicalReceptor_NormalizationMinMax(t *testing.T) {
+	cr := &ChemicalReceptor{
+		ChemicalName:           "nutr",
+		UptakeRate:             1.0,
+		OutputNormalizationMin: 10.0,
+		OutputNormalizationMax: 20.0,
+		Threshold:              0.0,
+		ReceptorType:           ReceptorTypeExcitatory,
+	}
+
+	// At min -> output should be 0.0, consumed = conc * uptakeRate * dt
+	ch := map[string]float64{"nutr": 10.0}
+	out, consumed := cr.GetOutput(ch, 1.0)
+	assert.InDelta(t, 0.0, out, 1e-9)
+	assert.InDelta(t, 10.0, consumed, 1e-9)
+
+	// Midpoint -> normalized to 0.5
+	ch["nutr"] = 15.0
+	out, consumed = cr.GetOutput(ch, 1.0)
+	assert.InDelta(t, 0.5, out, 1e-9)
+	assert.InDelta(t, 15.0, consumed, 1e-9)
+
+	// At max -> normalized to 1.0
+	ch["nutr"] = 20.0
+	out, consumed = cr.GetOutput(ch, 1.0)
+	assert.InDelta(t, 1.0, out, 1e-9)
+	assert.InDelta(t, 20.0, consumed, 1e-9)
+}
+
+func TestChemicalReceptor_ThresholdBehavior(t *testing.T) {
+	cr := &ChemicalReceptor{
+		ChemicalName: "fuel",
+		UptakeRate:   1.0,
+		Threshold:    1.0,
+		ReceptorType: ReceptorTypeExcitatory,
+	}
+
+	// Below threshold -> no output, no consumption
+	ch := map[string]float64{"fuel": 0.5}
+	out, consumed := cr.GetOutput(ch, 1.0)
+	assert.InDelta(t, 0.0, out, 1e-9)
+	assert.InDelta(t, 0.0, consumed, 1e-9)
+
+	// At threshold -> produces output and consumes according to uptake
+	ch["fuel"] = 1.0
+	out, consumed = cr.GetOutput(ch, 1.0)
+	// uptake = concentration * uptakeRate * dt = 1.0
+	assert.InDelta(t, 1.0, out, 1e-9)
+	assert.InDelta(t, 1.0, consumed, 1e-9)
+
+	// Above threshold with smaller dt
+	ch["fuel"] = 2.0
+	out, consumed = cr.GetOutput(ch, 0.5)
+	// uptake = 2.0 * 1.0 * 0.5 = 1.0
+	assert.InDelta(t, 1.0, out, 1e-9)
+	assert.InDelta(t, 1.0, consumed, 1e-9)
+}

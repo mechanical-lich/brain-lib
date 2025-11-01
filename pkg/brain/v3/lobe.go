@@ -171,31 +171,30 @@ func (l *Lobe) ApplyChemical(chemicalName string, concentration float64) float64
 func (l *Lobe) UpdateChemicalReceptors(dt float64, chemicals map[string]float64) map[string]float64 {
 	// Apply chemical receptors
 	for _, receptor := range l.ChemicalReceptors {
-		conc, ok := chemicals[receptor.ChemicalName]
-		if !ok || conc <= 0.0 {
+		// GetOutput will return the amount to apply to the target and will
+		// subtract the consumed chemical from the chemicals map.
+		out, consumed := receptor.GetOutput(chemicals, dt)
+		if out == 0.0 {
 			continue
 		}
-		amount := conc * receptor.UptakeRate * dt
 
+		applied := false
 		switch receptor.TargetType {
 		case TargetTypeNeuron:
 			if neuron, ok := l.Neurons[receptor.Target]; ok {
-				if receptor.ReceptorType == ReceptorTypeInhibitory {
-					neuron.ExternalInput -= amount
-				} else {
-					neuron.ExternalInput += amount
-				}
-				chemicals[receptor.ChemicalName] -= amount
+				neuron.ExternalInput += out
+				applied = true
 			}
 		case TargetTypeModulator:
 			if modulator, ok := l.Modulators[receptor.Target]; ok {
-				if receptor.ReceptorType == ReceptorTypeInhibitory {
-					modulator.Level -= amount
-				} else {
-					modulator.Level += amount
-				}
-				chemicals[receptor.ChemicalName] -= amount
+				modulator.Level += out
+				applied = true
 			}
+		}
+
+		// Only subtract consumed chemical if the receptor was applied to a real target
+		if applied {
+			chemicals[receptor.ChemicalName] -= consumed
 		}
 	}
 
