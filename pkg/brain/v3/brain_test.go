@@ -160,7 +160,7 @@ func TestBrainPlasticityChemicalReceptors(t *testing.T) {
 	chemicals := map[string]float64{
 		"reward_chemical": 2.0,
 	}
-	chemicals = b.ApplyChemistry(chemicals, 0.1)
+	b.ApplyChemistry(chemicals, 0.1)
 
 	// Verify dopamine was increased
 	assert.Greater(t, b.Modulators[Dopamine].Level, 0.0, "Dopamine should be increased by chemical receptor")

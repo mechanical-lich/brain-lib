@@ -63,8 +63,8 @@ func TestUpdateChemicalReceptors_and_BrainIntegration(t *testing.T) {
 	b.AddLobe(l)
 	// Provide a fresh chemicals map
 	chem := map[string]float64{"food": 1.0}
-	out := b.ApplyChemistry(chem, 0.5) // amount = 1.0 * 0.5 * 0.5 = 0.25
-	assert.InDelta(t, 0.75, out["food"], 1e-9)
+	b.ApplyChemistry(chem, 0.5) // amount = 1.0 * 0.5 * 0.5 = 0.25
+	assert.InDelta(t, 0.75, chem["food"], 1e-9)
 	// target neuron on l should have received the input
 	assert.Greater(t, l.GetNeuron("target").ExternalInput, 0.0)
 

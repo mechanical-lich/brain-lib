@@ -27,15 +27,14 @@ func NewBrain() *Brain {
 	return b
 }
 
-func (b *Brain) ApplyChemistry(chemicals map[string]float64, dt float64) map[string]float64 {
+func (b *Brain) ApplyChemistry(chemicals map[string]float64, dt float64) {
 	// Apply brain-level chemical receptors first
-	chemicals = b.UpdateChemicalReceptors(dt, chemicals)
+	b.UpdateChemicalReceptors(dt, chemicals)
 
 	// Then apply lobe-level receptors
 	for _, lobe := range b.Lobes {
-		chemicals = lobe.UpdateChemicalReceptors(dt, chemicals)
+		lobe.UpdateChemicalReceptors(dt, chemicals)
 	}
-	return chemicals
 }
 
 func (b *Brain) Step(dt float64) {
@@ -237,7 +236,7 @@ func (b *Brain) AddReceptor(chemicalName string, uptakeRate float64, target stri
 
 // UpdateChemicalReceptors applies brain-level chemical receptors
 // This can be used to have chemicals affect brain-level modulators or specific neurons across lobes
-func (b *Brain) UpdateChemicalReceptors(dt float64, chemicals map[string]float64) map[string]float64 {
+func (b *Brain) UpdateChemicalReceptors(dt float64, chemicals map[string]float64) {
 	for _, receptor := range b.ChemicalReceptors {
 		conc, ok := chemicals[receptor.ChemicalName]
 		if !ok || conc <= 0.0 {
@@ -262,7 +261,6 @@ func (b *Brain) UpdateChemicalReceptors(dt float64, chemicals map[string]float64
 		}
 	}
 
-	return chemicals
 }
 
 func (b *Brain) AddSynapse(synapse *Synapse) {
