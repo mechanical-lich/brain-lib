@@ -24,12 +24,13 @@ type Lobe struct {
 	Synapses    map[string]*Synapse `json:"synapses"`
 
 	// Lobe level settings
-	Name              string                `json:"name"`
-	Modulators        map[string]*Modulator `json:"modulators"`
-	Persists          bool                  `json:"persists"`   // Neurons retain activation between steps if true
-	DecayRate         float64               `json:"decay_rate"` // global decay rate applied to all neurons each step
-	ChemicalReceptors []*ChemicalReceptor   `json:"chemical_receptors"`
-	PlasticityConfig  PlasticityConfig      `json:"plasticity_config"` // Learning parameters
+	Name              string                   `json:"name"`
+	Modulators        map[string]*Modulator    `json:"modulators"`
+	Persists          bool                     `json:"persists"`   // Neurons retain activation between steps if true
+	DecayRate         float64                  `json:"decay_rate"` // global decay rate applied to all neurons each step
+	ChemicalReceptors []*ChemicalReceptor      `json:"chemical_receptors"`
+	Neuroemitters     map[string]*Neuroemitter `json:"neuroemitters"`     // Chemical emitters driven by neural activity
+	PlasticityConfig  PlasticityConfig         `json:"plasticity_config"` // Learning parameters
 	// Optional visual position for editor/UI
 	X float64 `json:"x,omitempty"`
 	Y float64 `json:"y,omitempty"`
@@ -138,6 +139,36 @@ func (l *Lobe) AddReceptor(chemicalName string, uptakeRate float64, target strin
 	l.ChemicalReceptors = append(l.ChemicalReceptors, receptor)
 }
 
+// AddEmitter adds a neuroemitter to the lobe
+func (l *Lobe) AddEmitter(id, chemicalName string, emissionRate, threshold float64) {
+	if l.Neuroemitters == nil {
+		l.Neuroemitters = make(map[string]*Neuroemitter)
+	}
+	emitter := NewNeuroemitter(id, chemicalName, emissionRate, threshold)
+	l.Neuroemitters[id] = emitter
+}
+
+// RemoveEmitter removes a neuroemitter from the lobe
+func (l *Lobe) RemoveEmitter(id string) {
+	if l.Neuroemitters != nil {
+		delete(l.Neuroemitters, id)
+	}
+	// Also remove any synapses connected to this emitter
+	for sid, s := range l.Synapses {
+		if s.To == id {
+			delete(l.Synapses, sid)
+		}
+	}
+}
+
+// GetEmitter returns a neuroemitter by ID
+func (l *Lobe) GetEmitter(id string) *Neuroemitter {
+	if l.Neuroemitters != nil {
+		return l.Neuroemitters[id]
+	}
+	return nil
+}
+
 func (l *Lobe) ApplyChemical(chemicalName string, concentration float64) float64 {
 	for _, receptor := range l.ChemicalReceptors {
 		if receptor.ChemicalName == chemicalName {
@@ -201,6 +232,25 @@ func (l *Lobe) UpdateChemicalReceptors(dt float64, chemicals map[string]float64)
 	return chemicals
 }
 
+// UpdateNeuroemitters processes all neuroemitters and adds their emissions to the chemistry map
+func (l *Lobe) UpdateNeuroemitters(dt float64, chemicals map[string]float64) map[string]float64 {
+	if l.Neuroemitters == nil {
+		return chemicals
+	}
+
+	for _, emitter := range l.Neuroemitters {
+		emission := emitter.Step(dt)
+		if emission > 0.0 {
+			if chemicals == nil {
+				chemicals = make(map[string]float64)
+			}
+			chemicals[emitter.ChemicalName] += emission
+		}
+	}
+
+	return chemicals
+}
+
 func (l *Lobe) Step(dt float64, now int) {
 	// Update modulators
 	for _, m := range l.Modulators {
@@ -235,6 +285,7 @@ func (l *Lobe) Step(dt float64, now int) {
 				}
 			}
 		}
+
 		// Compute neuron's new activation value (includes bias and activation func)
 		neuron.Compute(sum)
 
@@ -251,6 +302,18 @@ func (l *Lobe) Step(dt float64, now int) {
 			if pre, ok := l.Neurons[s.From]; ok {
 				// Decaying eligibility trace captures pre-post correlation
 				s.Trace = l.PlasticityConfig.TraceDecay*s.Trace + pre.ActivationVal*neuron.ActivationVal
+			}
+		}
+	}
+
+	// Send activation from neurons to neuroemitters via synapses
+	// This happens after all neurons have been updated
+	if l.Neuroemitters != nil {
+		for _, s := range l.Synapses {
+			if emitter := l.GetEmitter(s.To); emitter != nil {
+				if pre, ok := l.Neurons[s.From]; ok {
+					emitter.ReceiveInput(pre.ActivationVal * s.Weight)
+				}
 			}
 		}
 	}
