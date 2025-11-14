@@ -3,6 +3,8 @@ package brain
 import (
 	"encoding/json"
 	"os"
+
+	"github.com/google/uuid"
 )
 
 type Brain struct {
@@ -295,7 +297,7 @@ func (b *Brain) RemoveSynapse(id string) {
 
 func (b *Brain) Connect(fromLobe, fromNeuron, toLobe, toNeuron string, weight float64, plastic bool) *Synapse {
 	synapse := &Synapse{
-		ID:           fromLobe + "_" + fromNeuron + "_to_" + toLobe + "_" + toNeuron,
+		ID:           uuid.New().String(),
 		From:         fromNeuron,
 		To:           toNeuron,
 		FromLobe:     fromLobe,
@@ -393,4 +395,11 @@ func (b *Brain) Save(filePath string) error {
 
 func (b *Brain) ToJSON() ([]byte, error) {
 	return json.MarshalIndent(b, "", "  ")
+}
+
+func (b *Brain) RefreshUpdateOrder() {
+	b.updateLobeOrder()
+	for _, lobe := range b.Lobes {
+		lobe.updateNeuronOrder()
+	}
 }

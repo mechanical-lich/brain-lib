@@ -34,6 +34,8 @@ type Lobe struct {
 	// Optional visual position for editor/UI
 	X float64 `json:"x,omitempty"`
 	Y float64 `json:"y,omitempty"`
+
+	WinnerTakesAll bool `json:"winner_takes_all,omitempty"` // If true only the most active neuron retains its activation each step
 }
 
 func NewLobe(name string, modulators map[string]*Modulator) *Lobe {
@@ -323,6 +325,21 @@ func (l *Lobe) Step(dt float64, now int) {
 
 	// Apply inactivity-based synaptic decay
 	l.applyInactivityDecay(dt, now)
+
+	if l.WinnerTakesAll {
+		var maxNeuron *Neuron
+		for _, neuron := range l.Neurons {
+			if maxNeuron == nil || neuron.ActivationVal > maxNeuron.ActivationVal {
+				maxNeuron = neuron
+			}
+		}
+
+		for _, neuron := range l.Neurons {
+			if neuron != maxNeuron {
+				neuron.ActivationVal = 0.0
+			}
+		}
+	}
 }
 
 // applyReinforcementLearning applies reward and punishment signals to plastic synapses

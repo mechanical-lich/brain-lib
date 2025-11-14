@@ -49,7 +49,7 @@ func (n *Neuron) Compute(sum float64) float64 {
 	v := sum + n.Bias + n.ExternalInput
 	out := applyActivation(n.Activation, v)
 
-	if n.ActivationVal < out && out > n.Threshold {
+	if n.ActivationVal < out && out >= n.Threshold {
 		n.ActivationVal = out
 	}
 
