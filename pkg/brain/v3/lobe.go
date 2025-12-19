@@ -32,8 +32,10 @@ type Lobe struct {
 	Neuroemitters     map[string]*Neuroemitter `json:"neuroemitters"`     // Chemical emitters driven by neural activity
 	PlasticityConfig  PlasticityConfig         `json:"plasticity_config"` // Learning parameters
 	// Optional visual position for editor/UI
-	X float64 `json:"x,omitempty"`
-	Y float64 `json:"y,omitempty"`
+	X      float64 `json:"x,omitempty"`
+	Y      float64 `json:"y,omitempty"`
+	Width  float64 `json:"width,omitempty"`
+	Height float64 `json:"height,omitempty"`
 
 	WinnerTakesAll bool `json:"winner_takes_all,omitempty"` // If true only the most active neuron retains its activation each step
 }
