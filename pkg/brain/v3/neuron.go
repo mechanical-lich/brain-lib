@@ -38,6 +38,9 @@ type Neuron struct {
 	Threshold     float64        `json:"threshold"` // Optional threshold value, activationVal must be this high otherwise it is 0.0
 	// Whether this neuron persists its activation between steps (overrides lobe-level persists if needed)
 	Persists bool `json:"persists,omitempty"`
+	// Capacitor mode: when true, input is ADDED to activation rather than replacing it (only if above threshold).
+	// This allows the neuron to accumulate charge over time, like a capacitor.
+	Capacitor bool `json:"capacitor,omitempty"`
 	// Optional visual position for editor/UI
 	X      float64 `json:"x,omitempty"`
 	Y      float64 `json:"y,omitempty"`
@@ -47,15 +50,24 @@ type Neuron struct {
 	GroupID int `json:"group_id,omitempty"`
 }
 
-func (n *Neuron) Compute(sum float64) float64 {
+func (n *Neuron) Compute(sum float64, dt float64) float64 {
 	v := sum + n.Bias + n.ExternalInput
 	out := applyActivation(n.Activation, v)
 
-	if n.ActivationVal < out && out >= n.Threshold {
-		n.ActivationVal = out
+	if n.Capacitor {
+		// Capacitor mode: add input to activation if above threshold
+		if out >= n.Threshold {
+			n.ActivationVal += out
+		}
+	} else {
+		// Standard mode: only update if new value is higher
+		if n.ActivationVal < out && out >= n.Threshold {
+			n.ActivationVal = out
+		}
 	}
 
-	n.ActivationVal -= n.ActivationVal * n.DecayRate
+	// Scale decay by time delta so it's frame-rate independent
+	n.ActivationVal -= n.ActivationVal * n.DecayRate * dt
 
 	n.ExternalInput = 0.0 // reset after use
 

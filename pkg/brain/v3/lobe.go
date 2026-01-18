@@ -291,10 +291,10 @@ func (l *Lobe) Step(dt float64, now int) {
 		}
 
 		// Compute neuron's new activation value (includes bias and activation func)
-		neuron.Compute(sum)
+		neuron.Compute(sum, dt)
 
-		// Lobe level decay if configured
-		neuron.ActivationVal -= neuron.ActivationVal * l.DecayRate
+		// Lobe level decay if configured (scale by dt for frame-rate independence)
+		neuron.ActivationVal -= neuron.ActivationVal * l.DecayRate * dt
 
 		// Update eligibility traces for plastic synapses targeting this neuron
 		// Use presynaptic activation (already updated in topological order) and
