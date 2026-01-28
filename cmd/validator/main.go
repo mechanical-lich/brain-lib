@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mechanical-lich/brain-lib/pkg/brain/v3"
-	"github.com/mechanical-lich/brain-lib/pkg/brain/v3/validation"
+	"github.com/mechanical-lich/brain-lib/pkg/brain"
+	"github.com/mechanical-lich/brain-lib/pkg/brain/validation"
 )
 
 func main() {

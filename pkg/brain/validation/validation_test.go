@@ -3,7 +3,7 @@ package validation
 import (
 	"testing"
 
-	"github.com/mechanical-lich/brain-lib/pkg/brain/v3"
+	"github.com/mechanical-lich/brain-lib/pkg/brain"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -3,7 +3,7 @@ package validation
 import (
 	"fmt"
 
-	"github.com/mechanical-lich/brain-lib/pkg/brain/v3"
+	"github.com/mechanical-lich/brain-lib/pkg/brain"
 )
 
 func FixSynapses(b *brain.Brain, complaints []Complaint) error {

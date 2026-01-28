@@ -1,7 +1,7 @@
 package validation
 
 import (
-	"github.com/mechanical-lich/brain-lib/pkg/brain/v3"
+	"github.com/mechanical-lich/brain-lib/pkg/brain"
 )
 
 type Complaint struct {
