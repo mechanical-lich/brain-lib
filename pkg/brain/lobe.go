@@ -190,9 +190,9 @@ func (l *Lobe) ApplyChemical(chemicalName string, concentration float64) float64
 			case TargetTypeModulator:
 				if modulator, ok := l.Modulators[receptor.Target]; ok {
 					if receptor.ReceptorType == ReceptorTypeInhibitory {
-						modulator.Level -= amount
+						modulator.Add(-amount)
 					} else {
-						modulator.Level += amount
+						modulator.Add(amount)
 					}
 					return concentration - amount
 				}
@@ -222,7 +222,7 @@ func (l *Lobe) UpdateChemicalReceptors(dt float64, chemicals map[string]float64)
 			}
 		case TargetTypeModulator:
 			if modulator, ok := l.Modulators[receptor.Target]; ok {
-				modulator.Level += out
+				modulator.Add(out)
 				applied = true
 			}
 		}
@@ -452,5 +452,5 @@ func (l *Lobe) Reinforce(chemicalName string, amount float64) {
 		l.Modulators[chemicalName] = m
 	}
 
-	m.Level += amount
+	m.Add(amount)
 }

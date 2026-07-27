@@ -221,7 +221,7 @@ func (b *Brain) Reinforce(chemicalName string, amount float64) {
 		b.Modulators[chemicalName] = m
 	}
 
-	m.Level += amount
+	m.Add(amount)
 }
 
 // AddReceptor adds a chemical receptor at the brain level that can affect any lobe or neuron
@@ -250,7 +250,7 @@ func (b *Brain) UpdateChemicalReceptors(dt float64, chemicals map[string]float64
 		case TargetTypeModulator:
 			// Brain-level modulator
 			if modulator, ok := b.Modulators[receptor.Target]; ok {
-				modulator.Level += out
+				modulator.Add(out)
 				applied = true
 			}
 		case TargetTypeNeuron:
