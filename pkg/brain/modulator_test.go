@@ -70,7 +70,7 @@ func TestInhibitoryReceptor_CannotInvertPunishment(t *testing.T) {
 	syn.Trace = 1.0
 	before := syn.Weight
 
-	l.applyReinforcementLearning()
+	l.applyReinforcementLearning(1.0)
 
 	assert.LessOrEqual(t, syn.Weight, before,
 		"punishment must never strengthen a synapse")

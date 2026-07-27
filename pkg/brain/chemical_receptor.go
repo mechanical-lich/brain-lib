@@ -35,8 +35,16 @@ func (cr *ChemicalReceptor) GetOutput(chemistry map[string]float64, dt float64) 
 		return 0.0, 0.0
 	}
 
-	// Uptake scales with dt
+	// Uptake scales with dt, and cannot exceed what is actually in the pool.
+	//
+	// The clamp used to be applied only to `consumed`, not to `output`, so a
+	// receptor with UptakeRate 5.0 against a pool of 1.0 delivered 5.0 to its
+	// target while removing 1.0 — matter out of nothing, and a reward source
+	// that scaled with the rate rather than the supply.
 	uptake := concentration * cr.UptakeRate * dt
+	if uptake > concentration {
+		uptake = concentration
+	}
 
 	// Normalize output if min and max are set (based on concentration)
 	output := uptake
@@ -56,11 +64,8 @@ func (cr *ChemicalReceptor) GetOutput(chemistry map[string]float64, dt float64) 
 		output = -output
 	}
 
-	// consumed amount is the actual uptake (always positive)
+	// consumed amount is the actual uptake (always positive, already clamped)
 	consumed := uptake
-	if consumed > concentration {
-		consumed = concentration
-	}
 
 	return output, consumed
 }

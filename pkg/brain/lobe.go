@@ -1,19 +1,23 @@
 package brain
 
-// PlasticityConfig controls learning parameters for a lobe
+// PlasticityConfig controls learning parameters for a lobe.
+//
+// Every rate here is **per second**. They used to be per simulation step, which
+// made learning depend on frame rate: the same simulated second produced a
+// weight change of 0.29 at 15 TPS and a clip-pinned 1.0 at 30 TPS and above.
 type PlasticityConfig struct {
-	TraceDecay         float64 `json:"trace_decay"`          // How fast eligibility traces fade (default 0.9)
-	RewardLearningRate float64 `json:"reward_learning_rate"` // Learning rate for rewards (default 0.1)
-	PunishLearningRate float64 `json:"punish_learning_rate"` // Learning rate for punishment (default 0.15)
-	InactivityDecay    float64 `json:"inactivity_decay"`     // Rate weights return to baseline when unused (default 0.00001)
+	TraceDecay         float64 `json:"trace_decay"`          // Eligibility trace decay rate per second (1.0 = ~1s window)
+	RewardLearningRate float64 `json:"reward_learning_rate"` // Learning rate for rewards, per second
+	PunishLearningRate float64 `json:"punish_learning_rate"` // Learning rate for punishment, per second
+	InactivityDecay    float64 `json:"inactivity_decay"`     // Rate weights return to baseline when unused, per second
 }
 
-// DefaultPlasticityConfig returns sensible defaults for creature learning
+// DefaultPlasticityConfig returns sensible defaults for creature learning.
 func DefaultPlasticityConfig() PlasticityConfig {
 	return PlasticityConfig{
-		TraceDecay:         0.90,
-		RewardLearningRate: 0.10,
-		PunishLearningRate: 0.15,
+		TraceDecay:         1.0,  // ~1 second eligibility window
+		RewardLearningRate: 10.0, // ~4% of a [-2,2] range per second at full drive
+		PunishLearningRate: 15.0,
 		InactivityDecay:    0.00001,
 	}
 }
@@ -182,33 +186,18 @@ func (l *Lobe) GetEmitter(id string) *Neuroemitter {
 	return nil
 }
 
-func (l *Lobe) ApplyChemical(chemicalName string, concentration float64) float64 {
-	for _, receptor := range l.ChemicalReceptors {
-		if receptor.ChemicalName == chemicalName {
-			amount := concentration * receptor.UptakeRate
-			switch receptor.TargetType {
-			case TargetTypeNeuron:
-				if neuron, ok := l.Neurons[receptor.Target]; ok {
-					if receptor.ReceptorType == ReceptorTypeInhibitory {
-						neuron.ExternalInput -= amount
-					} else {
-						neuron.ExternalInput += amount
-					}
-					return concentration - amount
-				}
-			case TargetTypeModulator:
-				if modulator, ok := l.Modulators[receptor.Target]; ok {
-					if receptor.ReceptorType == ReceptorTypeInhibitory {
-						modulator.Add(-amount)
-					} else {
-						modulator.Add(amount)
-					}
-					return concentration - amount
-				}
-			}
-		}
-	}
-	return concentration
+// ApplyChemical applies a single chemical to this lobe's receptors and returns
+// what is left of it.
+//
+// This used to be a second, independent receptor implementation: it ignored
+// Threshold, dt and output normalization, returned after the first matching
+// receptor so only one could ever fire, and could hand back a negative
+// concentration when UptakeRate exceeded 1. It now delegates to
+// UpdateChemicalReceptors so there is exactly one receptor code path.
+func (l *Lobe) ApplyChemical(chemicalName string, concentration, dt float64) float64 {
+	chemicals := map[string]float64{chemicalName: concentration}
+	l.UpdateChemicalReceptors(dt, chemicals)
+	return chemicals[chemicalName]
 }
 
 // Applies all the chemicals in the map that it can and returns an updated map with the remaining concentrations
@@ -302,8 +291,8 @@ func (l *Lobe) Step(dt float64, now int) {
 		// Compute neuron's new activation value (includes bias and activation func)
 		neuron.Compute(sum, dt)
 
-		// Lobe level decay if configured (scale by dt for frame-rate independence)
-		neuron.ActivationVal -= neuron.ActivationVal * l.DecayRate * dt
+		// Lobe level decay if configured; DecayRate is per second.
+		neuron.ActivationVal *= decayFactor(l.DecayRate, dt)
 
 		// Update eligibility traces for plastic synapses targeting this neuron
 		// Use presynaptic activation (already updated in topological order) and
@@ -314,7 +303,14 @@ func (l *Lobe) Step(dt float64, now int) {
 			}
 			if pre, ok := l.Neurons[s.From]; ok {
 				// Decaying eligibility trace captures pre-post correlation
-				s.Trace = l.PlasticityConfig.TraceDecay*s.Trace + pre.ActivationVal*neuron.ActivationVal
+				// Eligibility trace as a proper leaky integrator:
+				//   dTrace/dt = -Trace/tau + pre*post
+				// TraceDecay is the per-second decay rate. The old form
+				// `Trace = TraceDecay*Trace + pre*post` had no dt at all, so both the
+				// accumulation and the time constant scaled with frame rate: the same
+				// simulated second produced a trace of 16 at 15 TPS and 326 at 600.
+				decay := decayFactor(l.PlasticityConfig.TraceDecay, dt)
+				s.Trace = decay*s.Trace + pre.ActivationVal*neuron.ActivationVal*dt
 			}
 		}
 	}
@@ -332,7 +328,7 @@ func (l *Lobe) Step(dt float64, now int) {
 	}
 
 	// Apply multi-modal reinforcement learning
-	l.applyReinforcementLearning()
+	l.applyReinforcementLearning(dt)
 
 	// Apply inactivity-based synaptic decay
 	l.applyInactivityDecay(dt, now)
@@ -354,7 +350,7 @@ func (l *Lobe) Step(dt float64, now int) {
 }
 
 // applyReinforcementLearning applies reward and punishment signals to plastic synapses
-func (l *Lobe) applyReinforcementLearning() {
+func (l *Lobe) applyReinforcementLearning(dt float64) {
 	// Get current chemical levels
 	dopamineLevel := 0.0
 	serotoninLevel := 0.0
@@ -378,8 +374,10 @@ func (l *Lobe) applyReinforcementLearning() {
 		// Punishment weakens active pathways (negative reinforcement)
 		punishDelta := -s.Trace * l.PlasticityConfig.PunishLearningRate * serotoninLevel
 
-		// Apply combined update
-		s.Weight += rewardDelta + punishDelta
+		// Apply combined update, scaled by dt so learning rates are per second.
+		// Without this the same simulated second produced a weight change of
+		// 0.29 at 15 TPS and a clip-pinned 1.0 at 30 TPS and above.
+		s.Weight += (rewardDelta + punishDelta) * dt
 
 		s.Clip()
 	}

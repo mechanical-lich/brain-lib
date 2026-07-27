@@ -55,9 +55,12 @@ func (n *Neuron) Compute(sum float64, dt float64) float64 {
 	out := applyActivation(n.Activation, v)
 
 	if n.Capacitor {
-		// Capacitor mode: add input to activation if above threshold
+		// Capacitor mode: integrate input into activation if above threshold.
+		// Scaled by dt so charge accumulates per second rather than per frame —
+		// it was the one term in this function that was still frame-rate
+		// dependent.
 		if out >= n.Threshold {
-			n.ActivationVal += out
+			n.ActivationVal += out * dt
 		}
 	} else {
 		// Standard mode: only update if new value is higher
@@ -66,8 +69,8 @@ func (n *Neuron) Compute(sum float64, dt float64) float64 {
 		}
 	}
 
-	// Scale decay by time delta so it's frame-rate independent
-	n.ActivationVal -= n.ActivationVal * n.DecayRate * dt
+	// Exponential decay; DecayRate is per second.
+	n.ActivationVal *= decayFactor(n.DecayRate, dt)
 
 	n.ExternalInput = 0.0 // reset after use
 

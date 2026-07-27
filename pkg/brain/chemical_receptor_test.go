@@ -14,7 +14,7 @@ func TestApplyChemical_SingleReceptor(t *testing.T) {
 	l.AddReceptor("chemA", 0.2, "n1", TargetTypeNeuron, ReceptorTypeExcitatory)
 
 	// Apply 1.0 concentration
-	rem := l.ApplyChemical("chemA", 1.0)
+	rem := l.ApplyChemical("chemA", 1.0, 1.0)
 
 	// neuron should have received concentration * uptake
 	assert.InDelta(t, 0.2, l.GetNeuron("n1").ExternalInput, 1e-9)
@@ -30,7 +30,7 @@ func TestApplyChemical_InhibitoryReceptor(t *testing.T) {
 	// inhibitory receptor should subtract from ExternalInput
 	l.AddReceptor("chemB", 0.2, "n2", TargetTypeNeuron, ReceptorTypeInhibitory)
 
-	rem := l.ApplyChemical("chemB", 1.0)
+	rem := l.ApplyChemical("chemB", 1.0, 1.0)
 	// amount = 0.2 taken -> ExternalInput should decrease from 0.5 to 0.3
 	assert.InDelta(t, 0.3, l.GetNeuron("n2").ExternalInput, 1e-9)
 	assert.InDelta(t, 0.8, rem, 1e-9)

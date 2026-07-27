@@ -28,8 +28,8 @@ func (m *Modulator) Add(delta float64) {
 }
 
 func (m *Modulator) Step(dt float64) {
-	// simple exponential decay towards 0
-	m.Level -= m.Level * m.DecayRate * dt
+	// Exponential decay towards 0. DecayRate is per second.
+	m.Level *= decayFactor(m.DecayRate, dt)
 
 	// A brain loaded from an older file may carry a negative level. Decay would
 	// creep it back toward zero over many ticks; clamp so it can't invert

@@ -132,11 +132,9 @@ func TestPlasticityPunishment(t *testing.T) {
 func TestPlasticityConfig(t *testing.T) {
 	l := NewLobe("plastic", nil)
 
-	// Check default config is set
-	assert.Equal(t, 0.90, l.PlasticityConfig.TraceDecay)
-	assert.Equal(t, 0.10, l.PlasticityConfig.RewardLearningRate)
-	assert.Equal(t, 0.15, l.PlasticityConfig.PunishLearningRate)
-	assert.Equal(t, 0.00001, l.PlasticityConfig.InactivityDecay)
+	// Check default config is set. These are per-second rates.
+	assert.Equal(t, DefaultPlasticityConfig(), l.PlasticityConfig)
+	assert.Greater(t, l.PlasticityConfig.TraceDecay, 0.0, "a zero trace decay disables the fallback check in applyInterLobePlasticity")
 
 	// Test custom config
 	l.PlasticityConfig.RewardLearningRate = 0.5

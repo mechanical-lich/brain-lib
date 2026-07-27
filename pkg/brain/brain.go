@@ -109,8 +109,11 @@ func (b *Brain) Step(dt float64) {
 			}
 
 			// Update eligibility trace using target lobe's plasticity config
-			// (source lobe has already been stepped, so its activations are current)
-			syn.Trace = lobe.PlasticityConfig.TraceDecay*syn.Trace + fromNeuron.ActivationVal*toNeuron.ActivationVal
+			// (source lobe has already been stepped, so its activations are current).
+			// Leaky integrator, matching Lobe.Step: TraceDecay is a per-second
+			// decay rate and the input term is scaled by dt.
+			decay := decayFactor(lobe.PlasticityConfig.TraceDecay, dt)
+			syn.Trace = decay*syn.Trace + fromNeuron.ActivationVal*toNeuron.ActivationVal*dt
 		}
 	}
 
@@ -163,8 +166,8 @@ func (b *Brain) applyInterLobePlasticity(dt float64) {
 		// Punishment weakens active pathways
 		punishDelta := -syn.Trace * plasticityConfig.PunishLearningRate * serotoninLevel
 
-		// Apply combined update
-		syn.Weight += rewardDelta + punishDelta
+		// Apply combined update, scaled by dt so learning rates are per second.
+		syn.Weight += (rewardDelta + punishDelta) * dt
 
 		// Apply inactivity decay toward baseline
 		inactivitySteps := b.Tick - syn.LastUsed

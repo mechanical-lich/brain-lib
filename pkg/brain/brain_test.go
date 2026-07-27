@@ -255,9 +255,28 @@ func TestBrainPlasticityHierarchicalModulators(t *testing.T) {
 	// Step to apply plasticity
 	b.Step(0.1)
 
-	// Synapse should strengthen significantly due to lobe-level dopamine
 	finalWeight := b.Synapses[syn.ID].Weight
-	assert.Greater(t, finalWeight, initialWeight+0.05, "Lobe-level modulator should override brain-level")
+	assert.Greater(t, finalWeight, initialWeight, "plastic synapse should have strengthened")
+
+	// The claim is that the lobe's own dopamine takes precedence over the
+	// brain's, so compare against an identical brain that only has the low
+	// brain-level signal. Asserting a fixed weight delta instead would just be
+	// pinning whatever the current learning-rate scaling happens to be.
+	control := NewBrain()
+	cA, cB := NewLobe("A", nil), NewLobe("B", nil)
+	cA.AddNeuron(&Neuron{ID: "n1", Bias: 1.0, Activation: ActLinear})
+	cB.AddNeuron(&Neuron{ID: "n2", Bias: 0.0, Activation: ActLinear})
+	control.AddLobe(cA)
+	control.AddLobe(cB)
+	controlSyn := control.Connect("A", "n1", "B", "n2", 0.3, true)
+	control.Reinforce(Dopamine, 0.1) // brain-level only
+
+	control.Step(0.1)
+	control.Step(0.1)
+	control.Step(0.1)
+
+	assert.Greater(t, finalWeight, control.Synapses[controlSyn.ID].Weight,
+		"lobe-level modulator (2.0) should drive more learning than brain-level alone (0.1)")
 }
 
 // TestBrainPlasticityInactivityDecay tests that inactive synapses decay toward baseline
