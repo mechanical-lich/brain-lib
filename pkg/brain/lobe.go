@@ -118,7 +118,16 @@ func (l *Lobe) GetNeuronOutput(id string) float64 {
 
 func (l *Lobe) Connect(fromID, toID string, weight float64, plastic bool) *Synapse {
 	synapse := &Synapse{
-		ID:           fromID + "->" + toID,
+		ID: fromID + "->" + toID,
+		// FromLobe/ToLobe used to be left empty here, which made every synapse
+		// this function produced look like it belonged to no lobe. The
+		// validator then flagged each one Wrong_Lobe_Synapse ("" != the lobe's
+		// name on both sides) and `validator repair` deleted it outright, and
+		// Brain.AddSynapse filed such synapses at brain level where Step skips
+		// them. Attributing the synapse to its owning lobe here is the root
+		// fix for both.
+		FromLobe:     l.Name,
+		ToLobe:       l.Name,
 		From:         fromID,
 		To:           toID,
 		Weight:       weight,

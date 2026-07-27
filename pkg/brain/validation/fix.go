@@ -110,13 +110,64 @@ func FixSynapses(b *brain.Brain, complaints []Complaint) error {
 				}
 			}
 
-		case Wrong_Lobe_Synapse:
+		case Unset_Lobe_Fields:
+			// Repair, don't delete: a synapse in a lobe's map belongs to that
+			// lobe, so record what was already true.
 			for _, l := range b.Lobes {
-				if _, ok := l.Synapses[id]; ok {
-					fmt.Printf("Deleted synapse %s in lobe %s: wrong lobe\n", id, l.Name)
+				if syn, ok := l.Synapses[id]; ok {
+					syn.FromLobe = l.Name
+					syn.ToLobe = l.Name
+					fmt.Printf("Attributed synapse %s to lobe %s\n", id, l.Name)
+					break
+				}
+			}
+
+		case Wrong_Lobe_Synapse:
+			// Move it to the lobe it names rather than destroying it. Deleting
+			// was unconditional, so a recoverable filing error cost the
+			// connection and its learned weight.
+			for _, l := range b.Lobes {
+				syn, ok := l.Synapses[id]
+				if !ok {
+					continue
+				}
+
+				target, exists := b.Lobes[syn.FromLobe]
+				if !exists {
+					fmt.Printf("Deleted synapse %s in lobe %s: names unknown lobe %s\n", id, l.Name, syn.FromLobe)
 					delete(l.Synapses, id)
 					break
 				}
+				if _, ok := target.Neurons[syn.From]; !ok {
+					fmt.Printf("Deleted synapse %s: missing neuron %s in lobe %s\n", id, syn.From, syn.FromLobe)
+					delete(l.Synapses, id)
+					break
+				}
+				if _, ok := target.Neurons[syn.To]; !ok {
+					fmt.Printf("Deleted synapse %s: missing neuron %s in lobe %s\n", id, syn.To, syn.ToLobe)
+					delete(l.Synapses, id)
+					break
+				}
+
+				delete(l.Synapses, id)
+				target.AddSynapse(syn)
+				fmt.Printf("Moved synapse %s from lobe %s to lobe %s\n", id, l.Name, target.Name)
+				break
+			}
+
+		case Unattributable_Synapse:
+			// Try to recover the lobes from neuron membership before giving up.
+			if syn, ok := b.Synapses[id]; ok {
+				b.AddSynapse(syn) // re-routes and fills in what it can
+				if syn.FromLobe != "" && syn.ToLobe != "" {
+					if syn.FromLobe == syn.ToLobe {
+						delete(b.Synapses, id)
+					}
+					fmt.Printf("Attributed brain-level synapse %s to %s -> %s\n", id, syn.FromLobe, syn.ToLobe)
+					continue
+				}
+				fmt.Printf("Deleted synapse %s: no lobe owns neurons %s / %s\n", id, syn.From, syn.To)
+				delete(b.Synapses, id)
 			}
 
 		default:

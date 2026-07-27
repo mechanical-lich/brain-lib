@@ -266,6 +266,23 @@ func (b *Brain) UpdateChemicalReceptors(dt float64, chemicals map[string]float64
 }
 
 func (b *Brain) AddSynapse(synapse *Synapse) {
+	// Fill in missing lobe attribution before routing.
+	//
+	// A synapse with both lobe fields empty used to fall straight through to
+	// b.Synapses, where Step skips it on FromLobe == "" — so it existed,
+	// transmitted nothing, and reported no error. Locating each endpoint's
+	// owning lobe recovers the intended wiring instead.
+	if synapse.FromLobe == "" {
+		if name, ok := b.lobeOwningNeuron(synapse.From); ok {
+			synapse.FromLobe = name
+		}
+	}
+	if synapse.ToLobe == "" {
+		if name, ok := b.lobeOwningNeuron(synapse.To); ok {
+			synapse.ToLobe = name
+		}
+	}
+
 	// If this is an intra-lobe synapse, also add it to the lobe's synapse map
 	if synapse.FromLobe != "" && synapse.FromLobe == synapse.ToLobe {
 		if l, ok := b.Lobes[synapse.FromLobe]; ok {
@@ -275,6 +292,31 @@ func (b *Brain) AddSynapse(synapse *Synapse) {
 		b.Synapses[synapse.ID] = synapse
 	}
 	b.updateLobeOrder()
+}
+
+// lobeOwningNeuron returns the name of the single lobe containing neuronID.
+//
+// Reports false when no lobe has the neuron, or when more than one does: with
+// an ambiguous name there is no safe inference, and guessing would silently
+// wire the synapse to the wrong lobe. Validation reports those instead.
+func (b *Brain) lobeOwningNeuron(neuronID string) (string, bool) {
+	if neuronID == "" {
+		return "", false
+	}
+	found := ""
+	for name, lobe := range b.Lobes {
+		if lobe == nil {
+			continue
+		}
+		if _, ok := lobe.Neurons[neuronID]; !ok {
+			continue
+		}
+		if found != "" {
+			return "", false // ambiguous
+		}
+		found = name
+	}
+	return found, found != ""
 }
 
 func (b *Brain) GetSynapse(id string) *Synapse {

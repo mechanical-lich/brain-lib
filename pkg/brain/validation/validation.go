@@ -14,6 +14,19 @@ func ValidateBrain(b *brain.Brain) []Complaint {
 
 	// Validate synapses at the brain level
 	for _, synapse := range b.Synapses {
+		// A brain-level synapse naming no lobes at all cannot be routed: Step
+		// skips it on FromLobe == "", so it transmits nothing. That is a
+		// distinct problem from an inter-lobe synapse pointing at its own lobe,
+		// and it must not be reported as one — the Inter_Synapse_To_Same_Lobe
+		// repair path deletes a synapse it cannot attribute.
+		if synapse.FromLobe == "" || synapse.ToLobe == "" {
+			complaints = append(complaints, Complaint{
+				ComplaintType: Unattributable_Synapse,
+				ID:            synapse.ID,
+			})
+			continue
+		}
+
 		// Validate if this is actually an intralobe synapse
 		if synapse.FromLobe == synapse.ToLobe {
 			complaints = append(complaints, Complaint{
@@ -57,6 +70,18 @@ func ValidateBrain(b *brain.Brain) []Complaint {
 	// Validate Lobes
 	for _, lobe := range b.Lobes {
 		for _, synapse := range lobe.Synapses {
+			// A synapse sitting in a lobe's own map with no lobe attribution
+			// belongs to that lobe by construction — that is what the map
+			// means. Reporting it as Wrong_Lobe_Synapse is what made repair
+			// delete every synapse Lobe.Connect had ever created.
+			if synapse.FromLobe == "" && synapse.ToLobe == "" {
+				complaints = append(complaints, Complaint{
+					ComplaintType: Unset_Lobe_Fields,
+					ID:            synapse.ID,
+				})
+				continue
+			}
+
 			// Validate if this is actually an intralobe synapse
 			if synapse.FromLobe != synapse.ToLobe {
 				complaints = append(complaints, Complaint{
@@ -74,8 +99,21 @@ func ValidateBrain(b *brain.Brain) []Complaint {
 				})
 			}
 
+			// Validate the endpoints against the lobe the synapse *names*, not
+			// merely the lobe whose map it happens to sit in. A misfiled
+			// synapse would otherwise also report missing neurons, and the
+			// repair for that deletes — so moving it to the correct lobe was
+			// immediately undone by a stale complaint from the same pass.
+			fromLobe, toLobe := lobe, lobe
+			if named, ok := b.Lobes[synapse.FromLobe]; ok {
+				fromLobe = named
+			}
+			if named, ok := b.Lobes[synapse.ToLobe]; ok {
+				toLobe = named
+			}
+
 			// Validate From exists
-			if _, ok := lobe.Neurons[synapse.From]; !ok {
+			if _, ok := fromLobe.Neurons[synapse.From]; !ok {
 				complaints = append(complaints, Complaint{
 					ComplaintType: Missing_Neuron_From,
 					ID:            synapse.ID,
@@ -83,7 +121,7 @@ func ValidateBrain(b *brain.Brain) []Complaint {
 			}
 
 			// Validate To exists
-			if _, ok := lobe.Neurons[synapse.To]; !ok {
+			if _, ok := toLobe.Neurons[synapse.To]; !ok {
 				complaints = append(complaints, Complaint{
 					ComplaintType: Missing_Neuron_To,
 					ID:            synapse.ID,
