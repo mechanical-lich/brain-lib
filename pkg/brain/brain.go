@@ -493,6 +493,9 @@ func LoadFromJson(data []byte) (*Brain, error) {
 
 	brain.updateLobeOrder()
 	for _, lobe := range brain.Lobes {
+		if lobe == nil {
+			continue // a JSON null lobe would panic here
+		}
 		lobe.updateNeuronOrder()
 	}
 

@@ -2,6 +2,7 @@ package validation
 
 import (
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/mechanical-lich/brain-lib/pkg/brain"
@@ -12,6 +13,11 @@ type Complaint struct {
 	ID            string // ID of the synapse, neuron, or lobe involved
 }
 
+// ValidateBrain reports every problem it can find, in a stable order.
+//
+// The result used to depend on Go's map iteration, so two runs over the same
+// brain listed the same complaints in different orders — awkward to diff, to
+// snapshot-test, or to show a user.
 func ValidateBrain(b *brain.Brain) []Complaint {
 	var complaints []Complaint
 
@@ -142,6 +148,13 @@ func ValidateBrain(b *brain.Brain) []Complaint {
 		}
 
 	}
+
+	sort.Slice(complaints, func(i, j int) bool {
+		if complaints[i].ComplaintType != complaints[j].ComplaintType {
+			return complaints[i].ComplaintType < complaints[j].ComplaintType
+		}
+		return complaints[i].ID < complaints[j].ID
+	})
 	return complaints
 }
 
@@ -190,6 +203,16 @@ func validateStructure(b *brain.Brain) []Complaint {
 			}
 			if !ok {
 				add(Dangling_Receptor_Target, key+"."+r.ChemicalName+"->"+r.Target)
+			}
+		}
+
+		// A persisting neuron relaxes toward its input with DecayRate as the
+		// time constant, so a rate of 0 is an infinite time constant: it holds
+		// whatever value it has forever and is deaf to everything feeding it.
+		// Coherent, but almost never what an author means.
+		for id, n := range lobe.Neurons {
+			if (lobe.Persists || n.Persists) && !n.Capacitor && n.DecayRate <= 0 {
+				add(Frozen_Persisting_Neuron, key+"."+id)
 			}
 		}
 

@@ -343,33 +343,44 @@ func (l *Lobe) Step(dt float64, now int, fallbackModulators map[string]*Modulato
 	// Send activation from neurons to neuroemitters via synapses
 	// This happens after all neurons have been updated
 	if l.Neuroemitters != nil {
-		for _, s := range l.Synapses {
-			if emitter := l.GetEmitter(s.To); emitter != nil {
-				if pre, ok := l.Neurons[s.From]; ok {
-					contribution := pre.ActivationVal * s.Weight
-
-					// Mark usage and update the trace, exactly as for a
-					// neuron-targeted synapse.
-					//
-					// The loops above filter on l.Neurons, so an
-					// emitter-targeted synapse used to get no LastUsed, no
-					// UsageCount and no trace — while applyInactivityDecay
-					// still saw it as permanently unused and dragged it back to
-					// InitWeight forever. Such a synapse could only ever decay,
-					// never learn.
-					if contribution != 0.0 {
-						s.LastUsed = now
-						s.UsageCount++
-					}
-					if s.Plastic {
-						// The emitter's "activation" is the input it is
-						// receiving; it has no activation value of its own.
-						decay := decayFactor(l.PlasticityConfig.TraceDecay, dt)
-						s.Trace = decay*s.Trace + pre.ActivationVal*contribution*dt
-					}
-
-					emitter.ReceiveInput(contribution)
+		// Emitters accumulate a float sum, so contributions must arrive in a
+		// stable order — the same reason neuron inputs use a sorted index.
+		for _, emitterID := range sortedEmitterIDs(l.Neuroemitters) {
+			emitter := l.Neuroemitters[emitterID]
+			for _, s := range l.incoming[emitterID] {
+				pre, ok := l.Neurons[s.From]
+				if !ok {
+					continue
 				}
+				contribution := pre.ActivationVal * s.Weight
+
+				// Mark usage and update the trace exactly as for a
+				// neuron-targeted synapse.
+				//
+				// The loops above filter on l.Neurons, so an emitter-targeted
+				// synapse used to get no LastUsed, no UsageCount and no trace —
+				// while applyInactivityDecay still saw it as permanently unused
+				// and dragged it back to InitWeight forever.
+				//
+				// "Used" keys off the presynaptic activation, not the product:
+				// testing the product meant a synapse whose weight happened to
+				// be exactly 0 never counted as used, so decay pinned it at
+				// zero and it could never learn again. Same reason the neuron
+				// path stopped testing the product.
+				if pre.ActivationVal != 0.0 {
+					s.LastUsed = now
+					s.UsageCount++
+				}
+				if s.Plastic {
+					// The postsynaptic term is the emitter's input, which is
+					// pre*weight. Using pre*contribution made this pre^2*weight
+					// — a trace that grew with the square of the source's
+					// activation and could never be negative.
+					decay := decayFactor(l.PlasticityConfig.TraceDecay, dt)
+					s.Trace = decay*s.Trace + pre.ActivationVal*dt
+				}
+
+				emitter.ReceiveInput(contribution)
 			}
 		}
 	}
@@ -595,4 +606,14 @@ func (l *Lobe) uniqueSynapseID(base string) string {
 			return candidate
 		}
 	}
+}
+
+// sortedEmitterIDs returns emitter IDs in a stable order.
+func sortedEmitterIDs(emitters map[string]*Neuroemitter) []string {
+	ids := make([]string, 0, len(emitters))
+	for id := range emitters {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }

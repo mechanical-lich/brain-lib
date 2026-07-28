@@ -24,4 +24,5 @@ const (
 	Init_Weight_Out_Of_Range ComplaintType = "Init_Weight_Out_Of_Range" // InitWeight sits outside [MinWeight, MaxWeight]
 	Non_Finite_Weight        ComplaintType = "Non_Finite_Weight"        // Weight, InitWeight or Trace is NaN or Inf
 	Lobe_Name_Key_Mismatch   ComplaintType = "Lobe_Name_Key_Mismatch"   // lobe.Name disagrees with its map key
+	Frozen_Persisting_Neuron ComplaintType = "Frozen_Persisting_Neuron" // Persisting neuron with DecayRate 0 can never change value
 )

@@ -85,12 +85,37 @@ func (n *Neuron) Compute(sum float64, dt float64, persists bool) float64 {
 		n.ActivationVal *= decayFactor(n.DecayRate, dt)
 
 	case persists:
-		// Relax toward the current input, with DecayRate as the time constant.
-		// This is what makes a persisting neuron a low-pass filter of its input
-		// rather than a max-hold: it rises *and* falls toward what it is being
-		// told, just slowly.
-		f := decayFactor(n.DecayRate, dt)
-		n.ActivationVal = out + (n.ActivationVal-out)*f
+		// Asymmetric: a stronger signal is taken immediately, a weaker one is
+		// relaxed toward with DecayRate as the time constant.
+		//
+		// Symmetric relaxation was measurably wrong for the signals these
+		// neurons carry. The shipped brain's attention slots feed
+		// `proximity -> focus` at weight 0.40, the largest single term in focus
+		// selection, and `decay_rate` there is 0.05. With both directions
+		// smoothed, a near object appearing beside an established far one took
+		// **5.75 simulated seconds** to win focus, and proximity never reached
+		// its true value at all (0.233 after 30s of a constant 0.3 input) — so
+		// the critter under-reported distance and stayed fixated on whatever it
+		// had been looking at.
+		//
+		// Rising instantly restores that: the near object leads from tick 1.
+		// Falling still relaxes, which is the point of the rewrite — the old
+		// code could only ratchet upward and then decay toward zero, so it
+		// could never follow its input down to a lower non-zero value.
+		//
+		// Compared by magnitude rather than sign, so a neuron opted into signed
+		// activation (Min < 0) responds to a strong inhibitory signal just as
+		// promptly as to a strong excitatory one.
+		//
+		// DecayRate 0 therefore means "rise instantly, never fall" — coherent,
+		// but a neuron that can only climb. The validator reports it as
+		// Frozen_Persisting_Neuron.
+		if math.Abs(out) >= math.Abs(n.ActivationVal) {
+			n.ActivationVal = out
+		} else {
+			f := decayFactor(n.DecayRate, dt)
+			n.ActivationVal = out + (n.ActivationVal-out)*f
+		}
 
 	default:
 		// Stateless neuron: activation is purely a function of this step's
