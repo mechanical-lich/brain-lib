@@ -21,7 +21,7 @@ func TestFix_MoveIntraFromBrainToLobe(t *testing.T) {
 
 	complaints := []Complaint{{ComplaintType: Inter_Synapse_To_Same_Lobe, ID: "s"}}
 
-	err := FixSynapses(br, complaints)
+	_, err := FixSynapses(br, complaints)
 	assert.NoError(t, err)
 	_, inBrain := br.Synapses["s"]
 	assert.False(t, inBrain)
@@ -42,7 +42,7 @@ func TestFix_DeleteMissingNeuron(t *testing.T) {
 
 	complaints := []Complaint{{ComplaintType: Missing_Neuron_From, ID: "bad"}}
 
-	err := FixSynapses(br, complaints)
+	_, err := FixSynapses(br, complaints)
 	assert.NoError(t, err)
 	_, exists := br.Synapses["bad"]
 	assert.False(t, exists)
@@ -64,7 +64,7 @@ func TestFix_MoveLobeToBrain(t *testing.T) {
 
 	complaints := []Complaint{{ComplaintType: Intra_Synapse_To_Different_Lobe, ID: "s2"}}
 
-	err := FixSynapses(br, complaints)
+	_, err := FixSynapses(br, complaints)
 	assert.NoError(t, err)
 	_, inLobe := l1.Synapses["s2"]
 	assert.False(t, inLobe)
@@ -88,7 +88,7 @@ func TestFix_InferToLobe(t *testing.T) {
 
 	complaints := []Complaint{{ComplaintType: Intra_Synapse_To_Different_Lobe, ID: "s3"}}
 
-	err := FixSynapses(br, complaints)
+	_, err := FixSynapses(br, complaints)
 	assert.NoError(t, err)
 	s, ok := br.Synapses["s3"]
 	assert.True(t, ok)
@@ -107,7 +107,7 @@ func TestFix_DeleteWhenCannotInferToLobe(t *testing.T) {
 
 	complaints := []Complaint{{ComplaintType: Intra_Synapse_To_Different_Lobe, ID: "s_del"}}
 
-	err := FixSynapses(br, complaints)
+	_, err := FixSynapses(br, complaints)
 	assert.NoError(t, err)
 
 	// Synapse should be deleted (not present in lobe or brain)

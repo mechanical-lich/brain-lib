@@ -2,21 +2,49 @@ package brain
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/google/uuid"
 )
 
 type Brain struct {
-	Lobes             map[string]*Lobe      `json:"lobes"`
-	updateOrder       []string              `json:"-"`
+	Lobes       map[string]*Lobe `json:"lobes"`
+	updateOrder []string         `json:"-"`
+	// byTargetLobe indexes inter-lobe synapses by ToLobe, rebuilt by updateLobeOrder.
+	byTargetLobe      map[string][]*Synapse `json:"-"`
 	Synapses          map[string]*Synapse   `json:"synapses"`
 	Modulators        map[string]*Modulator `json:"modulators"`         // Brain-level modulators
 	ChemicalReceptors []*ChemicalReceptor   `json:"chemical_receptors"` // Brain-level receptors
 	PlasticityConfig  PlasticityConfig      `json:"plasticity_config"`  // Default plasticity config for brain
 	// Tick is a simple step counter used for structural-plasticity bookkeeping
 	Tick int `json:"tick"`
+
+	// FormatVersion identifies the on-disk schema. Absent or 0 means a file
+	// written before versioning existed, which is read with the compatibility
+	// rules in LoadFromJson.
+	FormatVersion int `json:"format_version"`
 }
+
+// CurrentFormatVersion is the schema version Save/ToJSON writes.
+//
+// Version history:
+//
+//	0 - unversioned. Rates in PlasticityConfig were per simulation step, decay
+//	    used a linear approximation, and chemical receptors serialized in
+//	    PascalCase while the rest of the format was snake_case.
+//	1 - all rates are per second, decay is exponential, receptors and
+//	    neuroemitters use snake_case keys, and a neuroemitter's pending charge
+//	    persists.
+//
+// A version 0 file still loads: PascalCase receptor keys are accepted, and
+// missing plasticity configs are defaulted. Its *rate values* are not converted,
+// because there is no way to know the frame rate they were tuned at — a v0 file
+// loaded as v1 will learn far more slowly than it used to. Re-tune, or migrate
+// deliberately.
+const CurrentFormatVersion = 1
 
 func NewBrain() *Brain {
 	b := &Brain{
@@ -56,15 +84,12 @@ func (b *Brain) Step(dt float64) {
 			continue
 		}
 
-		// Inject cross-lobe inputs from source lobes that should already have been stepped
-		for _, syn := range b.Synapses {
-			if syn.ToLobe != lobe.Name {
-				continue
-			}
-			// skip if synapse doesn't reference a source lobe (shouldn't happen)
-			if syn.FromLobe == "" {
-				continue
-			}
+		// Inject cross-lobe inputs from source lobes that should already have
+		// been stepped. The index is ordered by synapse ID, so the float
+		// accumulation into ExternalInput is reproducible — ranging the map
+		// directly made the same brain and inputs produce bit-different
+		// activations run to run.
+		for _, syn := range b.byTargetLobe[lobe.Name] {
 			fromLobe, ok1 := b.Lobes[syn.FromLobe]
 			if !ok1 {
 				continue
@@ -75,12 +100,14 @@ func (b *Brain) Step(dt float64) {
 				continue
 			}
 
-			// Apply synaptic transmission
-			contribution := fromNeuron.ActivationVal * syn.Weight
-			toNeuron.ExternalInput += contribution
+			toNeuron.ExternalInput += fromNeuron.ActivationVal * syn.Weight
 
-			// Mark synapse as used if it contributed (for plasticity tracking)
-			if contribution != 0.0 && syn.Plastic {
+			// Usage is recorded for every synapse whose source was active, not
+			// only plastic ones and not only when the product was non-zero.
+			// Lobe.Step already recorded all synapses; the two disagreed, and
+			// testing the product meant a zero-weight synapse never counted as
+			// used and decayed forever.
+			if fromNeuron.ActivationVal != 0.0 {
 				syn.LastUsed = b.Tick
 				syn.UsageCount++
 			}
@@ -91,11 +118,8 @@ func (b *Brain) Step(dt float64) {
 
 		// Update eligibility traces for plastic cross-lobe synapses targeting this lobe
 		// Do this after the lobe has computed its new activations
-		for _, syn := range b.Synapses {
-			if syn.ToLobe != lobe.Name || !syn.Plastic {
-				continue
-			}
-			if syn.FromLobe == "" {
+		for _, syn := range b.byTargetLobe[lobe.Name] {
+			if !syn.Plastic {
 				continue
 			}
 			fromLobe, ok1 := b.Lobes[syn.FromLobe]
@@ -205,26 +229,7 @@ func (b *Brain) Reinforce(chemicalName string, amount float64) {
 	if b.Modulators == nil {
 		b.Modulators = make(map[string]*Modulator)
 	}
-
-	m, ok := b.Modulators[chemicalName]
-	if !ok {
-		// Create modulator if it doesn't exist with sensible defaults
-		decayRate := 0.5 // Medium decay by default
-		if chemicalName == Serotonin {
-			decayRate = 0.3 // Pain/punishment lingers longer
-		} else if chemicalName == Endorphin {
-			decayRate = 0.8 // Satisfaction fades quickly
-		}
-
-		m = &Modulator{
-			Name:      chemicalName,
-			Level:     0.0,
-			DecayRate: decayRate,
-		}
-		b.Modulators[chemicalName] = m
-	}
-
-	m.Add(amount)
+	reinforce(b.Modulators, chemicalName, amount)
 }
 
 // AddReceptor adds a chemical receptor at the brain level that can affect any lobe or neuron
@@ -257,8 +262,21 @@ func (b *Brain) UpdateChemicalReceptors(dt float64, chemicals map[string]float64
 				applied = true
 			}
 		case TargetTypeNeuron:
-			// Could target neurons in specific lobes by parsing target as "lobeName.neuronID"
-			// For now, skip neuron targeting at brain level (handled by lobes)
+			// Target a neuron anywhere in the brain, addressed as
+			// "lobeName.neuronID". This used to be an explicit empty case, so a
+			// brain-level neuron receptor succeeded and did nothing forever.
+			if lobeName, neuronID, ok := splitQualifiedNeuron(receptor.Target); ok {
+				if lobe, found := b.Lobes[lobeName]; found {
+					if neuron, found := lobe.Neurons[neuronID]; found {
+						neuron.ExternalInput += out
+						applied = true
+					}
+				}
+			} else if name, found := b.lobeOwningNeuron(receptor.Target); found {
+				// Unqualified but unambiguous.
+				b.Lobes[name].Neurons[receptor.Target].ExternalInput += out
+				applied = true
+			}
 		}
 
 		if applied {
@@ -359,7 +377,15 @@ func (b *Brain) Connect(fromLobe, fromNeuron, toLobe, toNeuron string, weight fl
 	return synapse
 }
 
+// updateLobeOrder recomputes the lobe update order and the inter-lobe synapse
+// index. Both the seed set and the edge walk are sorted, so the order is
+// reproducible — ranging the maps directly made it depend on Go's randomised
+// iteration.
 func (b *Brain) updateLobeOrder() {
+	b.byTargetLobe = buildIncomingIndex(b.Synapses, func(s *Synapse) string { return s.ToLobe })
+
+	outgoing := buildIncomingIndex(b.Synapses, func(s *Synapse) string { return s.FromLobe })
+
 	// simple topological sort based on synapse connections
 	visited := make(map[string]bool)
 	order := []string{}
@@ -372,16 +398,22 @@ func (b *Brain) updateLobeOrder() {
 		visited[lobeName] = true
 
 		// visit all lobes that this lobe connects to
-		for _, syn := range b.Synapses {
-			if syn.FromLobe == lobeName {
-				visit(syn.ToLobe)
-			}
+		for _, syn := range outgoing[lobeName] {
+			visit(syn.ToLobe)
 		}
 
-		order = append(order, lobeName)
+		if _, ok := b.Lobes[lobeName]; ok {
+			order = append(order, lobeName)
+		}
 	}
 
-	for lobeName := range b.Lobes {
+	lobeNames := make([]string, 0, len(b.Lobes))
+	for name := range b.Lobes {
+		lobeNames = append(lobeNames, name)
+	}
+	sort.Strings(lobeNames)
+
+	for _, lobeName := range lobeNames {
 		visit(lobeName)
 	}
 
@@ -407,6 +439,11 @@ func LoadFromJson(data []byte) (*Brain, error) {
 	}
 	if brain.Modulators == nil {
 		brain.Modulators = make(map[string]*Modulator)
+	}
+
+	if brain.FormatVersion > CurrentFormatVersion {
+		return nil, fmt.Errorf("brain: file format version %d is newer than this build supports (%d)",
+			brain.FormatVersion, CurrentFormatVersion)
 	}
 
 	// Set default plasticity config if not loaded
@@ -450,6 +487,9 @@ func LoadFromJson(data []byte) (*Brain, error) {
 		lobe.updateNeuronOrder()
 	}
 
+	// Anything we have just normalized is, by definition, current.
+	brain.FormatVersion = CurrentFormatVersion
+
 	return &brain, nil
 }
 
@@ -488,6 +528,8 @@ func LoadBrain(filePath string) (*Brain, error) {
 }
 
 func (b *Brain) Save(filePath string) error {
+	b.FormatVersion = CurrentFormatVersion
+
 	data, err := json.MarshalIndent(b, "", "  ")
 	if err != nil {
 		return err
@@ -496,6 +538,8 @@ func (b *Brain) Save(filePath string) error {
 }
 
 func (b *Brain) ToJSON() ([]byte, error) {
+	b.FormatVersion = CurrentFormatVersion
+
 	return json.MarshalIndent(b, "", "  ")
 }
 
@@ -504,4 +548,13 @@ func (b *Brain) RefreshUpdateOrder() {
 	for _, lobe := range b.Lobes {
 		lobe.updateNeuronOrder()
 	}
+}
+
+// splitQualifiedNeuron splits a "lobeName.neuronID" target.
+func splitQualifiedNeuron(target string) (lobe, neuron string, ok bool) {
+	i := strings.IndexByte(target, '.')
+	if i <= 0 || i == len(target)-1 {
+		return "", "", false
+	}
+	return target[:i], target[i+1:], true
 }

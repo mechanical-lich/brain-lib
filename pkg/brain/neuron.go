@@ -31,11 +31,14 @@ type Neuron struct {
 	Activation    ActivationFunc `json:"activation"`
 	ActivationVal float64        `json:"activation_val"`
 	ExternalInput float64        `json:"external_lobe_input"`
-	LearningRate  float64        `json:"learning_rate"`
-	DecayRate     float64        `json:"decay_rate"`
-	Max           float64        `json:"max_value"` // Optional max value clamp
-	Min           float64        `json:"min_value"` // Optional min value clamp
-	Threshold     float64        `json:"threshold"` // Optional threshold value, activationVal must be this high otherwise it is 0.0
+	// LearningRate is serialized but never read by this library. Plasticity is
+	// driven entirely by the lobe's PlasticityConfig; per-neuron rates were
+	// never implemented. Kept so existing files round-trip without losing data.
+	LearningRate float64 `json:"learning_rate"`
+	DecayRate    float64 `json:"decay_rate"`
+	Max          float64 `json:"max_value"` // Optional max value clamp
+	Min          float64 `json:"min_value"` // Optional min value clamp
+	Threshold    float64 `json:"threshold"` // Optional threshold value, activationVal must be this high otherwise it is 0.0
 	// Whether this neuron persists its activation between steps (overrides lobe-level persists if needed)
 	Persists bool `json:"persists,omitempty"`
 	// Capacitor mode: when true, input is ADDED to activation rather than replacing it (only if above threshold).

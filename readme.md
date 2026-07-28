@@ -63,3 +63,41 @@ Run the unit tests for all packages:
 cd brain-lib
 go test ./... -v
 ```
+
+## Package map
+
+Which package is used by what, so "unused here" is not mistaken for "dead":
+
+| Package | Consumers | Notes |
+|---|---|---|
+| `pkg/brain` | `critters` (the game), `critter-laboratory` | The live library. Rate-coded neurons, neuromodulators, chemical receptors and emitters, eligibility-trace plasticity. |
+| `pkg/brain/validation` | `cmd/validator`, the lab | Structural checks and repair for brain files. |
+| `pkg/ann` | `cmd/brain-trainer` | Classic feed-forward network with backpropagation. Not used by the game. |
+| `pkg/pnn` | Experimental / other alife projects | Plastic neural network sketch. Shares some concepts with `pkg/brain` but is a separate implementation. |
+
+## Synapse ownership
+
+A synapse lives in exactly one place, and which one is determined by its lobes:
+
+- **Intra-lobe** (`FromLobe == ToLobe`): stored in that `Lobe.Synapses`, stepped
+  by `Lobe.Step`.
+- **Inter-lobe** (`FromLobe != ToLobe`): stored in `Brain.Synapses`, stepped by
+  `Brain.Step`, which injects into the target's `ExternalInput`.
+
+`Brain.AddSynapse` routes on this rule, inferring the lobes from neuron
+membership when they are not set. `cmd/validator` detects and repairs
+violations — a synapse filed in the wrong place, or naming lobes that do not
+exist.
+
+Note that for an intra-lobe synapse the `FromLobe`/`ToLobe` fields are not read
+by the simulation at all; `Lobe.Step` resolves connections by neuron ID within
+its own map. They matter for routing, serialization and validation.
+
+## Time and units
+
+All rates are **per second**, and all decay is exponential, so behaviour does
+not depend on the simulation's frame rate. `Brain.Step(dt)` takes the elapsed
+time in seconds.
+
+Brain files carry a `format_version`; see `CurrentFormatVersion` in
+`pkg/brain/brain.go` for the history and what a version 0 file means.

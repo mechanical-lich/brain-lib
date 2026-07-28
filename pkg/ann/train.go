@@ -3,6 +3,7 @@ package ann
 import (
 	"encoding/json"
 	"log/slog"
+	"math"
 	"os"
 )
 
@@ -26,9 +27,14 @@ func Train(ann *ANN, trainingData []TrainingExample, epochs int, learningRate fl
 	}
 }
 
+// computeLoss returns mean squared error.
+//
+// A length mismatch returns +Inf rather than 0.0. Returning zero reported
+// *perfect* loss for malformed data, so a training run on a bad dataset looked
+// like it had converged immediately.
 func computeLoss(predicted, actual []float64) float64 {
 	if len(predicted) != len(actual) {
-		return 0.0
+		return math.Inf(1)
 	}
 	var sum float64
 	for i := range predicted {

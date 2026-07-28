@@ -29,7 +29,8 @@ func TestRepair_KeepsSynapsesMadeByLobeConnect(t *testing.T) {
 	require.Len(t, l.Synapses, 1, "precondition: lobe has the connected synapse")
 
 	complaints := ValidateBrain(b)
-	require.NoError(t, FixSynapses(b, complaints))
+	_, err := FixSynapses(b, complaints)
+	require.NoError(t, err)
 
 	assert.Len(t, b.Lobes["L"].Synapses, 1,
 		"repair deleted a synapse created by Lobe.Connect")
@@ -44,7 +45,8 @@ func TestRepair_KeepsSynapsesMadeByLobeConnect(t *testing.T) {
 func TestRepair_FillsInMissingLobeFields(t *testing.T) {
 	b, _, syn := lobeWithConnect()
 
-	require.NoError(t, FixSynapses(b, ValidateBrain(b)))
+	_, err := FixSynapses(b, ValidateBrain(b))
+	require.NoError(t, err)
 
 	got := b.Lobes["L"].Synapses[syn.ID]
 	require.NotNil(t, got, "synapse should still exist")
@@ -139,7 +141,8 @@ func TestRepair_MovesWrongLobeSynapseInsteadOfDeleting(t *testing.T) {
 		ID: "s1", From: "a", To: "b", FromLobe: "right", ToLobe: "right", Weight: 0.7,
 	})
 
-	require.NoError(t, FixSynapses(b, ValidateBrain(b)))
+	_, err := FixSynapses(b, ValidateBrain(b))
+	require.NoError(t, err)
 
 	assert.NotContains(t, b.Lobes["wrong"].Synapses, "s1", "should have left the wrong lobe")
 	require.Contains(t, b.Lobes["right"].Synapses, "s1",

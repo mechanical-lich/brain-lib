@@ -4,13 +4,15 @@ package brain
 // Unlike receptors which consume chemicals to affect neurons, emitters produce chemicals when
 // neurons reach certain activation thresholds.
 type Neuroemitter struct {
-	ID           string  // Unique identifier for this emitter
-	ChemicalName string  // Name of chemical this emitter releases
-	EmissionRate float64 // Rate at which the chemical is emitted when activated
-	Threshold    float64 // Activation threshold that must be met before emitting
+	ID           string  `json:"id"`            // Unique identifier for this emitter
+	ChemicalName string  `json:"chemical_name"` // Name of chemical this emitter releases
+	EmissionRate float64 `json:"emission_rate"` // Rate at which the chemical is emitted when activated
+	Threshold    float64 `json:"threshold"`     // Activation threshold that must be met before emitting
 
-	// Accumulated activation from incoming synapses
-	accumulatedActivation float64
+	// AccumulatedActivation is input received from synapses since the last
+	// emission. It is persisted: it was previously unexported, so a brain saved
+	// between receiving input and emitting silently dropped the pending charge.
+	AccumulatedActivation float64 `json:"accumulated_activation,omitempty"`
 }
 
 // NewNeuroemitter creates a new neuroemitter
@@ -25,7 +27,7 @@ func NewNeuroemitter(id, chemicalName string, emissionRate, threshold float64) *
 
 // ReceiveInput accumulates input from a synapse (called during neuron activation propagation)
 func (ne *Neuroemitter) ReceiveInput(input float64) {
-	ne.accumulatedActivation += input
+	ne.AccumulatedActivation += input
 }
 
 // Step processes the neuroemitter for a time step, emitting chemicals if threshold is met
@@ -34,17 +36,17 @@ func (ne *Neuroemitter) Step(dt float64) float64 {
 	emission := 0.0
 
 	// Only emit if accumulated activation meets or exceeds threshold
-	if ne.accumulatedActivation >= ne.Threshold {
-		emission = ne.accumulatedActivation * ne.EmissionRate * dt
+	if ne.AccumulatedActivation >= ne.Threshold {
+		emission = ne.AccumulatedActivation * ne.EmissionRate * dt
 	}
 
 	// Reset accumulated activation for next step
-	ne.accumulatedActivation = 0.0
+	ne.AccumulatedActivation = 0.0
 
 	return emission
 }
 
 // Reset clears the accumulated activation
 func (ne *Neuroemitter) Reset() {
-	ne.accumulatedActivation = 0.0
+	ne.AccumulatedActivation = 0.0
 }

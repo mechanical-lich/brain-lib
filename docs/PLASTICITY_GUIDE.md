@@ -1,4 +1,11 @@
-# Neural Plasticity Guide for Critters
+# Plasticity Guide
+
+> **Units note (2026-07-25):** every rate in `PlasticityConfig`, and every
+> `decay_rate`, is **per second**. They used to be per simulation step, which
+> made learning depend on frame rate. Decay is exponential (`exp(-rate*dt)`),
+> so a rate is a true time constant at any step size. Files written before this
+> carry `format_version` 0; see `CurrentFormatVersion` in `pkg/brain/brain.go`.
+
 
 This guide explains how to use the reinforcement learning system in your Creatures-style artificial life simulation.
 
@@ -21,7 +28,7 @@ Synapses maintain an "eligibility trace" that records recent correlations betwee
 - Punishment learning is slightly faster by default (animals learn faster from pain)
 
 ### 3. Inactivity Decay
-Unused synapses slowly decay toward zero, but never below `MinDecayFrac` of their initial weight. This prevents:
+Unused synapses slowly decay back toward their initial weight. This prevents:
 - Runaway weight growth
 - Irrelevant learned behaviors persisting forever
 - Enables re-learning in new contexts
@@ -111,7 +118,7 @@ func (critter *Critter) EscapeDanger() {
 ```go
 func (game *Game) UpdateCritter(critter *Critter, dt float64) {
     // Step the brain (updates neurons, eligibility traces, applies plasticity)
-    critter.Brain.Step(dt, game.TickCount)
+    critter.Brain.Step(dt)
     
     // Check various conditions and apply reinforcement
     
@@ -218,7 +225,7 @@ lobe.Modulators[brain.Serotonin] = serotonin
 ```go
 // Connect with custom min decay fraction
 synapse := lobe.Connect("input", "output", 0.5, true)
-synapse.MinDecayFrac = 0.2  // Can decay to 20% of initial weight
+// NOTE: MinDecayFrac is serialized but never read - decay has no floor.
 ```
 
 ## Recommended Starting Values
@@ -230,7 +237,7 @@ For a Creatures-style game, start with these values:
 TraceDecay:         0.90   // 10% decay per step - adjust based on your timestep
 RewardLearningRate: 0.10   // Moderate reward learning
 PunishLearningRate: 0.15   // Slightly faster punishment learning
-InactivityDecay:    0.001  // Very slow forgetting
+InactivityDecay:    0.00001 // Very slow forgetting (matches the library default)
 
 // Modulator decay rates
 Dopamine:    0.5   // Medium-fast (reward fades fairly quickly)
@@ -238,7 +245,7 @@ Serotonin:   0.3   // Slower (pain lingers)
 Endorphin:   0.8   // Fast (satisfaction is brief)
 
 // Synapse settings
-MinDecayFrac: 0.1  // Can decay to 10% of initial weight
+// MinDecayFrac: serialized but not implemented; do not rely on it.
 MinWeight:   -2.0  // Allow strong inhibition
 MaxWeight:    2.0  // Allow strong excitation
 ```

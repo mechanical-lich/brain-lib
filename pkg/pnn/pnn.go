@@ -2,6 +2,7 @@ package pnn
 
 import (
 	"encoding/json"
+	"math"
 	"math/rand"
 )
 
@@ -13,8 +14,20 @@ type PNN struct {
 	Outputs     map[string]string     `json:"outputs"` // motorName -> neuronID
 	Modulators  map[string]*Modulator `json:"modulators"`
 	Seed        int64                 `json:"seed"`
-	rng         *rand.Rand
+
+	// CollectDiagnostics makes Step return a full weight/modulator snapshot.
+	// Off by default: Step used to build one on every call whether or not the
+	// caller looked at it.
+	CollectDiagnostics bool `json:"-"`
+
+	// rng is the network's own random source. It was initialised and then never
+	// used; anything stochastic should draw from it so a seeded PNN is
+	// reproducible.
+	rng *rand.Rand
 }
+
+// Rand returns the network's seeded random source.
+func (b *PNN) Rand() *rand.Rand { return b.rng }
 
 func NewPNN(seed int64) *PNN {
 	if seed == 0 {
@@ -55,18 +68,34 @@ func (b *PNN) Step(inputs map[string]float64, dt float64) (map[string]float64, D
 		}
 	}
 
-	// propagate through synapses using previous activations
-	// first compute neuron outputs without lateral propagation (synchronous update)
-	outs := make(map[string]float64)
+	// Propagate through synapses using the *previous* activations.
+	//
+	// This claimed to be a synchronous update but was not: Compute writes
+	// n.ActivationVal in place while the loop is still ranging b.Neurons, so a
+	// neuron visited later read its predecessors' already-updated values. Since
+	// Go randomises map iteration, the same seed produced different results run
+	// to run — measured at output 1.0 in 29 of 40 runs and 0.0 in the other 11.
+	//
+	// Summing against a snapshot, and only committing afterwards, makes the
+	// update genuinely synchronous and order-independent.
+	prev := make(map[string]float64, len(b.Neurons))
+	for id, n := range b.Neurons {
+		prev[id] = n.ActivationVal
+	}
+
 	for id, n := range b.Neurons {
 		// sum incoming synapses
 		for _, sid := range n.Incoming {
 			if s, ok := b.Synapses[sid]; ok {
-				if from, ok2 := b.Neurons[s.From]; ok2 {
-					sums[id] += from.ActivationVal * s.Weight
+				if _, ok2 := b.Neurons[s.From]; ok2 {
+					sums[id] += prev[s.From] * s.Weight
 				}
 			}
 		}
+	}
+
+	outs := make(map[string]float64, len(b.Neurons))
+	for id, n := range b.Neurons {
 		outs[id] = n.Compute(sums[id])
 	}
 
@@ -75,14 +104,24 @@ func (b *PNN) Step(inputs map[string]float64, dt float64) (map[string]float64, D
 		m.Step(dt)
 	}
 
-	// apply plasticity: simple Hebbian scaled by a modulator (e.g., dopamine)
-	modLevel := 1.0
+	// Apply plasticity: simple Hebbian scaled by a modulator (e.g., dopamine).
+	//
+	// modLevel used to start at 1.0, so learning ran at full speed with no
+	// reward signal at all (measured: a weight drifting 0.1 -> 0.573 in 20
+	// steps of zero dopamine). It is now the modulator level itself, so no
+	// signal means no learning.
+	modLevel := 0.0
 	if d, ok := b.Modulators["dopamine"]; ok {
-		modLevel += d.Level
+		modLevel = d.Level
 	}
 
 	for sid, s := range b.Synapses {
 		if !s.Plastic {
+			continue
+		}
+		if modLevel == 0 {
+			// No reward signal: let the trace fade but do not move the weight.
+			s.Trace *= decayFactor(traceDecayPerSecond, dt)
 			continue
 		}
 		pre := 0.0
@@ -93,10 +132,14 @@ func (b *PNN) Step(inputs map[string]float64, dt float64) (map[string]float64, D
 		if to, ok := b.Neurons[s.To]; ok {
 			post = to.ActivationVal
 		}
-		// eligibility trace
-		s.Trace = 0.9*s.Trace + pre*post
-		delta := s.Trace * (s.Weight) * 0.1 * modLevel
-		s.Weight += delta
+		// Eligibility trace as a leaky integrator, scaled by dt so learning is
+		// per second rather than per call.
+		s.Trace = decayFactor(traceDecayPerSecond, dt)*s.Trace + pre*post*dt
+
+		// Additive, not multiplicative. Scaling the update by s.Weight meant a
+		// synapse sitting at exactly 0 could never learn anything, since every
+		// delta was multiplied by zero.
+		s.Weight += s.Trace * learningRatePerSecond * modLevel * dt
 		s.Clip()
 		_ = sid
 	}
@@ -109,13 +152,18 @@ func (b *PNN) Step(inputs map[string]float64, dt float64) (map[string]float64, D
 		}
 	}
 
-	// diagnostics
-	diag := Diagnostics{Weights: make(map[string]float64), Mods: make(map[string]float64)}
-	for id, s := range b.Synapses {
-		diag.Weights[id] = s.Weight
-	}
-	for id, m := range b.Modulators {
-		diag.Mods[id] = m.Level
+	// Diagnostics are built only when asked for. Step used to allocate the full
+	// weight and modulator snapshot on every call whether or not the caller
+	// looked at it.
+	var diag Diagnostics
+	if b.CollectDiagnostics {
+		diag = Diagnostics{Weights: make(map[string]float64, len(b.Synapses)), Mods: make(map[string]float64, len(b.Modulators))}
+		for id, s := range b.Synapses {
+			diag.Weights[id] = s.Weight
+		}
+		for id, m := range b.Modulators {
+			diag.Mods[id] = m.Level
+		}
 	}
 
 	return motorOutputs, diag
@@ -127,4 +175,20 @@ func (b *PNN) ToJSON() (string, error) {
 		return "", err
 	}
 	return string(d), nil
+}
+
+const (
+	// traceDecayPerSecond is the eligibility trace's decay rate.
+	traceDecayPerSecond = 1.0
+	// learningRatePerSecond scales the Hebbian update.
+	learningRatePerSecond = 0.1
+)
+
+// decayFactor returns the exact exponential decay multiplier for `rate` per
+// second over `dt` seconds.
+func decayFactor(rate, dt float64) float64 {
+	if rate <= 0 || dt <= 0 {
+		return 1.0
+	}
+	return math.Exp(-rate * dt)
 }

@@ -93,13 +93,20 @@ func main() {
 				continue
 			}
 			inputs := make([]float64, net.NumInputs)
+			bad := false
 			for i, p := range parts {
 				v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
 				if err != nil {
+					// `continue` here used to skip only this field, leaving it
+					// at 0 and running the net on silently corrupted input.
 					fmt.Printf("Invalid input '%s'\n", p)
-					continue
+					bad = true
+					break
 				}
 				inputs[i] = v
+			}
+			if bad {
+				continue
 			}
 			out := net.Process(inputs)
 			fmt.Printf("Output: %v\n", out)

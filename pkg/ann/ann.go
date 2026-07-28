@@ -2,6 +2,7 @@ package ann
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"os"
 )
@@ -84,10 +85,36 @@ func relu(x float64) float64 {
 	return 0
 }
 
+// Process runs a forward pass.
+//
+// A wrong-sized input used to index out of range and panic; it now returns nil,
+// which callers can check. Use ProcessChecked for an explicit error.
 func (a *ANN) Process(inputs []float64) []float64 {
-	// Prepare to store current values
-	a.CurrentValues = make([][]float64, a.NumLayers+2) // input + hidden + output
-	a.CurrentValues[0] = make([]float64, len(inputs))
+	out, err := a.ProcessChecked(inputs)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
+// ProcessChecked runs a forward pass, reporting a malformed input rather than
+// panicking on it.
+func (a *ANN) ProcessChecked(inputs []float64) ([]float64, error) {
+	if len(inputs) != a.NumInputs {
+		return nil, fmt.Errorf("ann: expected %d inputs, got %d", a.NumInputs, len(inputs))
+	}
+	return a.process(inputs), nil
+}
+
+func (a *ANN) process(inputs []float64) []float64 {
+	// Reuse the CurrentValues buffers across calls. Process allocated the whole
+	// layer stack every time, which matters for anything calling it in a loop.
+	if len(a.CurrentValues) != a.NumLayers+2 {
+		a.CurrentValues = make([][]float64, a.NumLayers+2) // input + hidden + output
+	}
+	if len(a.CurrentValues[0]) != len(inputs) {
+		a.CurrentValues[0] = make([]float64, len(inputs))
+	}
 	copy(a.CurrentValues[0], inputs)
 
 	layerInput := inputs
@@ -118,7 +145,20 @@ func (a *ANN) Process(inputs []float64) []float64 {
 	return out
 }
 
-func (a *ANN) Backpropagate(inputs, targets []float64, learningRate float64) {
+// Backpropagate performs one training step. A malformed input or target is
+// reported rather than panicking mid-pass.
+func (a *ANN) Backpropagate(inputs, targets []float64, learningRate float64) error {
+	if len(inputs) != a.NumInputs {
+		return fmt.Errorf("ann: expected %d inputs, got %d", a.NumInputs, len(inputs))
+	}
+	if len(targets) != a.NumOutputs {
+		return fmt.Errorf("ann: expected %d targets, got %d", a.NumOutputs, len(targets))
+	}
+	a.backpropagate(inputs, targets, learningRate)
+	return nil
+}
+
+func (a *ANN) backpropagate(inputs, targets []float64, learningRate float64) {
 	// Forward pass: store activations and weighted sums for each layer
 	activations := make([][]float64, a.NumLayers+2) // input + hidden + output
 	zs := make([][]float64, a.NumLayers+1)

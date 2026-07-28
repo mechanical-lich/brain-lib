@@ -42,10 +42,14 @@ func main() {
 		if len(complaints) == 0 {
 			fmt.Println("No complaints found; nothing to repair")
 		} else {
-			err = validation.FixSynapses(b, complaints)
+			report, err := validation.FixSynapses(b, complaints)
 			if err != nil {
 				fmt.Printf("Error fixing synapses: %v\n", err)
 				return
+			}
+			fmt.Print(report)
+			if dels := report.Deletions(); len(dels) > 0 {
+				fmt.Printf("WARNING: %d synapse(s) were deleted, not repaired\n", len(dels))
 			}
 			err = b.Save(brainPath + ".fixed")
 			if err != nil {

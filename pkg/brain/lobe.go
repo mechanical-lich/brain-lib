@@ -1,5 +1,10 @@
 package brain
 
+import (
+	"fmt"
+	"sort"
+)
+
 // PlasticityConfig controls learning parameters for a lobe.
 //
 // Every rate here is **per second**. They used to be per simulation step, which
@@ -23,9 +28,11 @@ func DefaultPlasticityConfig() PlasticityConfig {
 }
 
 type Lobe struct {
-	Neurons     map[string]*Neuron  `json:"neurons"`
-	updateOrder []string            `json:"-"`
-	Synapses    map[string]*Synapse `json:"synapses"`
+	Neurons     map[string]*Neuron `json:"neurons"`
+	updateOrder []string           `json:"-"`
+	// incoming indexes synapses by target ID, rebuilt by updateNeuronOrder.
+	incoming map[string][]*Synapse `json:"-"`
+	Synapses map[string]*Synapse   `json:"synapses"`
 
 	// Lobe level settings
 	Name              string                   `json:"name"`
@@ -120,9 +127,14 @@ func (l *Lobe) GetNeuronOutput(id string) float64 {
 	return 0.0
 }
 
+// Connect creates an intra-lobe synapse.
+//
+// The ID is "from->to", so connecting the same pair twice would silently
+// replace the first synapse — including any weight it had learned. A repeat
+// connection now gets a numbered suffix instead.
 func (l *Lobe) Connect(fromID, toID string, weight float64, plastic bool) *Synapse {
 	synapse := &Synapse{
-		ID: fromID + "->" + toID,
+		ID: l.uniqueSynapseID(fromID + "->" + toID),
 		// FromLobe/ToLobe used to be left empty here, which made every synapse
 		// this function produced look like it belonged to no lobe. The
 		// validator then flagged each one Wrong_Lobe_Synapse ("" != the lobe's
@@ -181,6 +193,10 @@ func (l *Lobe) RemoveEmitter(id string) {
 			delete(l.Synapses, sid)
 		}
 	}
+
+	// Deleting synapses invalidates the topological order and the incoming
+	// index; every other mutator refreshes them and this one did not.
+	l.updateNeuronOrder()
 }
 
 // GetEmitter returns a neuroemitter by ID
@@ -278,15 +294,15 @@ func (l *Lobe) Step(dt float64, now int, fallbackModulators map[string]*Modulato
 
 		// Sum inputs from all synapses that target this neuron
 		sum := 0.0
-		for _, s := range l.Synapses {
-			if s.To != nid {
-				continue
-			}
+		for _, s := range l.incoming[nid] {
 			if pre, ok := l.Neurons[s.From]; ok {
-				mult := pre.ActivationVal * s.Weight
-				sum += mult
-				// mark synapse as used if presynaptic activity contributed
-				if mult != 0.0 {
+				sum += pre.ActivationVal * s.Weight
+				// "Used" means the presynaptic neuron was active, not that the
+				// product was non-zero. Testing the product meant a synapse
+				// whose weight happened to be exactly 0 never registered as
+				// used, so inactivity decay pinned it at zero forever and it
+				// could never recover.
+				if pre.ActivationVal != 0.0 {
 					s.LastUsed = now
 					s.UsageCount++
 				}
@@ -422,26 +438,74 @@ func (l *Lobe) applyInactivityDecay(dt float64, now int) {
 	}
 }
 
+// updateNeuronOrder recomputes the topological update order and the incoming
+// synapse index.
+//
+// Two properties this now guarantees that it did not before:
+//
+//   - Determinism. It used to seed the walk by ranging l.Neurons and to find
+//     predecessors by ranging l.Synapses, both randomised by Go. Within a
+//     cycle that changed the *semantic* order neurons updated in, not merely
+//     float rounding, so the same brain and inputs could diverge run to run.
+//   - No phantom entries. A synapse referencing a neuron that does not exist
+//     used to have its ID appended to updateOrder anyway, so
+//     len(updateOrder) == len(Neurons) was not an invariant and Step spent
+//     iterations on lookups that always missed.
 func (l *Lobe) updateNeuronOrder() {
-	l.updateOrder = make([]string, 0, len(l.Neurons))
-	visited := make(map[string]bool)
+	l.incoming = buildIncomingIndex(l.Synapses, func(s *Synapse) string { return s.To })
+
+	ids := sortedNeuronIDs(l.Neurons)
+	l.updateOrder = make([]string, 0, len(ids))
+
+	visited := make(map[string]bool, len(ids))
 	var visit func(nid string)
 	visit = func(nid string) {
 		if visited[nid] {
 			return
 		}
 		visited[nid] = true
-		// visit all neurons that feed into this one
-		for _, s := range l.Synapses {
-			if s.To == nid {
+		// Visit all neurons that feed into this one, in a stable order.
+		for _, s := range l.incoming[nid] {
+			if _, ok := l.Neurons[s.From]; ok {
 				visit(s.From)
 			}
 		}
-		l.updateOrder = append(l.updateOrder, nid)
+		// Only real neurons enter the order.
+		if _, ok := l.Neurons[nid]; ok {
+			l.updateOrder = append(l.updateOrder, nid)
+		}
 	}
-	for nid := range l.Neurons {
+	for _, nid := range ids {
 		visit(nid)
 	}
+}
+
+// sortedNeuronIDs returns neuron IDs in a stable order.
+func sortedNeuronIDs(neurons map[string]*Neuron) []string {
+	ids := make([]string, 0, len(neurons))
+	for id := range neurons {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// buildIncomingIndex groups synapses by the key function, sorted by synapse ID
+// so accumulation order — and therefore float rounding — is reproducible.
+//
+// This also collapses Step's cost. Both Brain.Step and Lobe.Step used to scan
+// the entire synapse map once per target, making transmission
+// O(targets x synapses); with the index it is O(synapses).
+func buildIncomingIndex(synapses map[string]*Synapse, key func(*Synapse) string) map[string][]*Synapse {
+	index := make(map[string][]*Synapse)
+	for _, s := range synapses {
+		k := key(s)
+		index[k] = append(index[k], s)
+	}
+	for _, list := range index {
+		sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+	}
+	return index
 }
 
 // Reinforce applies a reinforcement signal to a specified chemical modulator.
@@ -457,26 +521,7 @@ func (l *Lobe) Reinforce(chemicalName string, amount float64) {
 	if l.Modulators == nil {
 		l.Modulators = make(map[string]*Modulator)
 	}
-
-	m, ok := l.Modulators[chemicalName]
-	if !ok {
-		// Create modulator if it doesn't exist with sensible defaults
-		decayRate := 0.5 // Medium decay by default
-		if chemicalName == Serotonin {
-			decayRate = 0.3 // Pain/punishment lingers longer
-		} else if chemicalName == Endorphin {
-			decayRate = 0.8 // Satisfaction fades quickly
-		}
-
-		m = &Modulator{
-			Name:      chemicalName,
-			Level:     0.0,
-			DecayRate: decayRate,
-		}
-		l.Modulators[chemicalName] = m
-	}
-
-	m.Add(amount)
+	reinforce(l.Modulators, chemicalName, amount)
 }
 
 // modulatorLevel reads a modulator from the lobe's own set, falling back to the
@@ -536,5 +581,18 @@ func (l *Lobe) updateTraces(dt float64) {
 			continue // emitter targets are handled alongside emission
 		}
 		s.Trace = decay*s.Trace + pre.ActivationVal*post.ActivationVal*dt
+	}
+}
+
+// uniqueSynapseID returns base, or base#2, base#3... if base is taken.
+func (l *Lobe) uniqueSynapseID(base string) string {
+	if _, taken := l.Synapses[base]; !taken {
+		return base
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s#%d", base, n)
+		if _, taken := l.Synapses[candidate]; !taken {
+			return candidate
+		}
 	}
 }

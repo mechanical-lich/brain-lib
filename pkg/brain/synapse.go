@@ -13,8 +13,12 @@ type Synapse struct {
 	MaxWeight float64 `json:"max_weight"`
 
 	// Plasticity control
-	InitWeight   float64 `json:"init_weight"`    // Initial weight for decay bounds
-	MinDecayFrac float64 `json:"min_decay_frac"` // Minimum fraction of init weight (e.g., 0.1 = can decay to 10%)
+	InitWeight float64 `json:"init_weight"` // Initial weight for decay bounds
+	// MinDecayFrac is serialized but never read. Inactivity decay moves a weight
+	// toward InitWeight without a floor, so this has no effect — the plasticity
+	// guide documented it as active, which it never was. Kept so existing files
+	// round-trip without losing data.
+	MinDecayFrac float64 `json:"min_decay_frac"`
 
 	// Structural/usage stats
 	LastUsed   int `json:"last_used"`

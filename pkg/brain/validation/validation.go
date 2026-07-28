@@ -1,6 +1,9 @@
 package validation
 
 import (
+	"math"
+	"strings"
+
 	"github.com/mechanical-lich/brain-lib/pkg/brain"
 )
 
@@ -11,6 +14,8 @@ type Complaint struct {
 
 func ValidateBrain(b *brain.Brain) []Complaint {
 	var complaints []Complaint
+
+	complaints = append(complaints, validateStructure(b)...)
 
 	// Validate synapses at the brain level
 	for _, synapse := range b.Synapses {
@@ -132,4 +137,119 @@ func ValidateBrain(b *brain.Brain) []Complaint {
 
 	}
 	return complaints
+}
+
+// validateStructure adds the checks that have nothing to do with synapse
+// routing: receptors and emitters pointing at things that do not exist, IDs
+// colliding across namespaces, and numerically invalid weights.
+//
+// None of these were checked before, so a receptor naming a missing modulator
+// or a weight of NaN passed validation cleanly.
+func validateStructure(b *brain.Brain) []Complaint {
+	var complaints []Complaint
+	add := func(t ComplaintType, id string) {
+		complaints = append(complaints, Complaint{ComplaintType: t, ID: id})
+	}
+
+	for _, r := range b.ChemicalReceptors {
+		if !brainLevelReceptorResolves(b, r) {
+			add(Dangling_Receptor_Target, r.ChemicalName+"->"+r.Target)
+		}
+	}
+
+	for key, lobe := range b.Lobes {
+		if lobe == nil {
+			continue
+		}
+		if lobe.Name != key {
+			add(Lobe_Name_Key_Mismatch, key)
+		}
+
+		// A neuron and an emitter sharing an ID silently misroutes: Step
+		// resolves synapse targets against neurons first, so the emitter never
+		// receives anything.
+		for id := range lobe.Neuroemitters {
+			if _, clash := lobe.Neurons[id]; clash {
+				add(Duplicate_Node_ID, key+"."+id)
+			}
+		}
+
+		for _, r := range lobe.ChemicalReceptors {
+			ok := false
+			switch r.TargetType {
+			case brain.TargetTypeNeuron:
+				_, ok = lobe.Neurons[r.Target]
+			case brain.TargetTypeModulator:
+				_, ok = lobe.Modulators[r.Target]
+			}
+			if !ok {
+				add(Dangling_Receptor_Target, key+"."+r.ChemicalName+"->"+r.Target)
+			}
+		}
+
+		for id, syn := range lobe.Synapses {
+			_, isNeuron := lobe.Neurons[syn.To]
+			_, isEmitter := lobe.Neuroemitters[syn.To]
+			if !isNeuron && !isEmitter {
+				add(Dangling_Emitter_Synapse, id)
+			}
+			complaints = append(complaints, weightComplaints(syn)...)
+		}
+	}
+
+	for _, syn := range b.Synapses {
+		complaints = append(complaints, weightComplaints(syn)...)
+	}
+
+	return complaints
+}
+
+func brainLevelReceptorResolves(b *brain.Brain, r *brain.ChemicalReceptor) bool {
+	switch r.TargetType {
+	case brain.TargetTypeModulator:
+		_, ok := b.Modulators[r.Target]
+		return ok
+	case brain.TargetTypeNeuron:
+		// Either "lobe.neuron" or an unqualified, unambiguous neuron name.
+		if lobeName, neuronID, ok := splitTarget(r.Target); ok {
+			if lobe, found := b.Lobes[lobeName]; found {
+				_, found = lobe.Neurons[neuronID]
+				return found
+			}
+			return false
+		}
+		matches := 0
+		for _, lobe := range b.Lobes {
+			if _, ok := lobe.Neurons[r.Target]; ok {
+				matches++
+			}
+		}
+		return matches == 1
+	}
+	return false
+}
+
+func splitTarget(target string) (lobe, neuron string, ok bool) {
+	i := strings.IndexByte(target, '.')
+	if i <= 0 || i == len(target)-1 {
+		return "", "", false
+	}
+	return target[:i], target[i+1:], true
+}
+
+func weightComplaints(syn *brain.Synapse) []Complaint {
+	var out []Complaint
+	for _, v := range []float64{syn.Weight, syn.InitWeight, syn.Trace} {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			out = append(out, Complaint{ComplaintType: Non_Finite_Weight, ID: syn.ID})
+			break
+		}
+	}
+	// Only meaningful when bounds are actually set.
+	if syn.MinWeight < syn.MaxWeight {
+		if syn.InitWeight < syn.MinWeight || syn.InitWeight > syn.MaxWeight {
+			out = append(out, Complaint{ComplaintType: Init_Weight_Out_Of_Range, ID: syn.ID})
+		}
+	}
+	return out
 }

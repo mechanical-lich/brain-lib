@@ -38,3 +38,33 @@ func (m *Modulator) Step(dt float64) {
 		m.Level = 0
 	}
 }
+
+// defaultDecayRate returns the per-second decay a modulator gets when one is
+// created implicitly by Reinforce.
+func defaultDecayRate(chemicalName string) float64 {
+	switch chemicalName {
+	case Serotonin:
+		return 0.3 // Pain/punishment lingers longer
+	case Endorphin:
+		return 0.8 // Satisfaction fades quickly
+	default:
+		return 0.5 // Medium decay
+	}
+}
+
+// reinforce adds to a named modulator in the given set, creating it if absent.
+//
+// Brain.Reinforce and Lobe.Reinforce were verbatim copies of this, so any fix
+// to one silently missed the other.
+func reinforce(modulators map[string]*Modulator, chemicalName string, amount float64) {
+	m, ok := modulators[chemicalName]
+	if !ok {
+		m = &Modulator{
+			Name:      chemicalName,
+			Level:     0.0,
+			DecayRate: defaultDecayRate(chemicalName),
+		}
+		modulators[chemicalName] = m
+	}
+	m.Add(amount)
+}

@@ -13,3 +13,15 @@ const (
 	Unset_Lobe_Fields               ComplaintType = "Unset_Lobe_Fields"               // Synapse in a lobe's map with empty FromLobe/ToLobe - repairable
 	Unattributable_Synapse          ComplaintType = "Unattributable_Synapse"          // Brain-level synapse whose lobes cannot be determined
 )
+
+// Additional checks. ValidateBrain previously looked only at synapse wiring, so
+// a receptor or emitter pointing at nothing, a weight of NaN, or an ID shared
+// between a neuron and an emitter all passed silently.
+const (
+	Dangling_Receptor_Target ComplaintType = "Dangling_Receptor_Target" // Receptor targets a neuron/modulator that does not exist
+	Dangling_Emitter_Synapse ComplaintType = "Dangling_Emitter_Synapse" // Synapse targets neither a neuron nor an emitter
+	Duplicate_Node_ID        ComplaintType = "Duplicate_Node_ID"        // A neuron and an emitter share an ID in one lobe
+	Init_Weight_Out_Of_Range ComplaintType = "Init_Weight_Out_Of_Range" // InitWeight sits outside [MinWeight, MaxWeight]
+	Non_Finite_Weight        ComplaintType = "Non_Finite_Weight"        // Weight, InitWeight or Trace is NaN or Inf
+	Lobe_Name_Key_Mismatch   ComplaintType = "Lobe_Name_Key_Mismatch"   // lobe.Name disagrees with its map key
+)
