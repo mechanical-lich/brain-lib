@@ -119,11 +119,6 @@ func (b *PNN) Step(inputs map[string]float64, dt float64) (map[string]float64, D
 		if !s.Plastic {
 			continue
 		}
-		if modLevel == 0 {
-			// No reward signal: let the trace fade but do not move the weight.
-			s.Trace *= decayFactor(traceDecayPerSecond, dt)
-			continue
-		}
 		pre := 0.0
 		post := 0.0
 		if from, ok := b.Neurons[s.From]; ok {
@@ -136,10 +131,18 @@ func (b *PNN) Step(inputs map[string]float64, dt float64) (map[string]float64, D
 		// per second rather than per call.
 		s.Trace = decayFactor(traceDecayPerSecond, dt)*s.Trace + pre*post*dt
 
+		// The trace is built above whether or not a reward is present: an
+		// eligibility trace exists precisely so that activity *before* a reward
+		// can be credited when one arrives. Skipping accumulation while
+		// modLevel was zero meant nothing that happened before the first-ever
+		// reward — or after any reset — could ever be reinforced.
+		//
 		// Additive, not multiplicative. Scaling the update by s.Weight meant a
 		// synapse sitting at exactly 0 could never learn anything, since every
 		// delta was multiplied by zero.
-		s.Weight += s.Trace * learningRatePerSecond * modLevel * dt
+		if modLevel != 0 {
+			s.Weight += s.Trace * learningRatePerSecond * modLevel * dt
+		}
 		s.Clip()
 		_ = sid
 	}

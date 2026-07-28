@@ -61,9 +61,18 @@ func (b *Brain) ApplyChemistry(chemicals map[string]float64, dt float64) {
 	// Apply brain-level chemical receptors first
 	b.UpdateChemicalReceptors(dt, chemicals)
 
-	// Then apply lobe-level receptors
-	for _, lobe := range b.Lobes {
-		lobe.UpdateChemicalReceptors(dt, chemicals)
+	// Then apply lobe-level receptors, in the stable update order.
+	//
+	// Receptors *consume* from a shared pool, so whoever runs first gets the
+	// chemical. Ranging b.Lobes made that a coin flip: with the shipped brain's
+	// dopamine receptors in both attention and decision at a high uptake rate,
+	// one lobe took nearly the whole pool and the other took the remainder —
+	// and which one varied run to run. Stepping is deterministic but chemistry
+	// was not, so the two disagreed.
+	for _, name := range b.updateOrder {
+		if lobe, ok := b.Lobes[name]; ok {
+			lobe.UpdateChemicalReceptors(dt, chemicals)
+		}
 	}
 }
 

@@ -66,3 +66,33 @@ func TestJSONRoundTrip(t *testing.T) {
 		t.Fatalf("Neuron count mismatch after roundtrip: %d vs %d", len(b2.Neurons), len(b.Neurons))
 	}
 }
+
+// An eligibility trace exists precisely so activity *before* a reward can be
+// credited when one arrives. Skipping accumulation while dopamine was zero meant
+// nothing that happened before the first-ever reward could ever be reinforced —
+// which is every startup and every reset.
+func TestTraceAccumulatesBeforeFirstReward(t *testing.T) {
+	b := makeTestBrain(1)
+
+	// Run with no reward at all.
+	for i := 0; i < 20; i++ {
+		b.Step(map[string]float64{"sens": 1.0}, 1.0/60)
+	}
+
+	syn := b.Synapses["s1"]
+	if syn.Trace <= 0 {
+		t.Fatalf("no eligibility trace built without a reward signal: %v", syn.Trace)
+	}
+	if syn.Weight != 0.1 {
+		t.Fatalf("weight moved without a reward signal: %v", syn.Weight)
+	}
+
+	// Now a reward arrives: the trace built beforehand must be creditable.
+	b.Modulators["dopamine"].Level = 1.0
+	b.Modulators["dopamine"].DecayRate = 0
+	b.Step(map[string]float64{"sens": 1.0}, 1.0/60)
+
+	if syn.Weight <= 0.1 {
+		t.Fatalf("delayed reward found nothing to reinforce: weight %v", syn.Weight)
+	}
+}

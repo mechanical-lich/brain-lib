@@ -323,3 +323,49 @@ func TestWinnerTakesAllTieIsDeterministic(t *testing.T) {
 	}
 	require.Len(t, winners, 1, "a tie should always resolve to the same neuron, got %v", winners)
 }
+
+// Chemical receptors consume from a shared pool, so the order lobes are visited
+// decides who gets the chemical. ApplyChemistry ranged b.Lobes, so with two
+// lobes competing for one pool the split flipped run to run — a 10x semantic
+// difference per tick at high uptake rates. Stepping was deterministic while
+// chemistry was not.
+func TestApplyChemistryIsDeterministic(t *testing.T) {
+	build := func() *Brain {
+		b := NewBrain()
+		for _, name := range []string{"attention", "decision", "concept", "memory"} {
+			l := NewLobe(name, nil)
+			l.AddNeuron(&Neuron{ID: "n"})
+			l.Modulators[Dopamine] = &Modulator{Name: Dopamine, DecayRate: 0}
+			// High uptake, so the first lobe to run takes nearly the whole pool.
+			l.AddReceptor("dopamine", 0.9, Dopamine, TargetTypeModulator, ReceptorTypeExcitatory)
+			b.AddLobe(l)
+		}
+		return b
+	}
+
+	sample := func() map[string]float64 {
+		b := build()
+		chem := map[string]float64{"dopamine": 1.0}
+		b.ApplyChemistry(chem, 1.0)
+		out := map[string]float64{}
+		for name, l := range b.Lobes {
+			out[name] = l.Modulators[Dopamine].Level
+		}
+		return out
+	}
+
+	reference := sample()
+	for i := 0; i < 30; i++ {
+		assert.Equal(t, reference, sample(),
+			"run %d: lobes consumed the shared chemical pool in a different order", i)
+	}
+
+	// Sanity: the setup really is contended, so the test would catch a regression.
+	var maxLevel float64
+	for _, v := range reference {
+		if v > maxLevel {
+			maxLevel = v
+		}
+	}
+	require.Greater(t, maxLevel, 0.5, "one lobe should take most of the pool - otherwise this proves nothing")
+}

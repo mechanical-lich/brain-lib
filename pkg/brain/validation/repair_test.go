@@ -149,3 +149,25 @@ func TestRepair_MovesWrongLobeSynapseInsteadOfDeleting(t *testing.T) {
 		"repair destroyed a recoverable synapse instead of moving it")
 	assert.Equal(t, 0.7, b.Lobes["right"].Synapses["s1"].Weight)
 }
+
+// A synapse targeting a neuroemitter is valid, but emitters do not live in
+// lobe.Neurons — so it was reported as Missing_Neuron_To, whose repair deletes.
+// Exactly the data-loss class this validator was fixed to stop, just one
+// namespace over.
+func TestRepair_KeepsNeuronToEmitterSynapses(t *testing.T) {
+	b := brain.NewBrain()
+	l := brain.NewLobe("L", nil)
+	l.AddNeuron(&brain.Neuron{ID: "a"})
+	l.AddEmitter("e1", "dopamine", 0.5, 0.0)
+	syn := l.Connect("a", "e1", 0.75, true)
+	b.AddLobe(l)
+
+	assert.Empty(t, ValidateBrain(b), "a neuron->emitter synapse is valid wiring")
+
+	_, err := FixSynapses(b, ValidateBrain(b))
+	require.NoError(t, err)
+
+	require.Contains(t, b.Lobes["L"].Synapses, syn.ID,
+		"repair deleted a valid neuron->emitter synapse")
+	assert.Equal(t, 0.75, b.Lobes["L"].Synapses[syn.ID].Weight)
+}

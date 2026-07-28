@@ -125,8 +125,14 @@ func ValidateBrain(b *brain.Brain) []Complaint {
 				})
 			}
 
-			// Validate To exists
-			if _, ok := toLobe.Neurons[synapse.To]; !ok {
+			// Validate To exists. A synapse may legitimately target a
+			// neuroemitter, which does not live in lobe.Neurons — reporting
+			// those as Missing_Neuron_To made repair delete every valid
+			// neuron->emitter connection, the exact data-loss class this
+			// validator was fixed to stop.
+			_, toIsNeuron := toLobe.Neurons[synapse.To]
+			_, toIsEmitter := toLobe.Neuroemitters[synapse.To]
+			if !toIsNeuron && !toIsEmitter {
 				complaints = append(complaints, Complaint{
 					ComplaintType: Missing_Neuron_To,
 					ID:            synapse.ID,
