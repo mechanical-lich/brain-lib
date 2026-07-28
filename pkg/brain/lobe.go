@@ -141,6 +141,11 @@ func (l *Lobe) Connect(fromID, toID string, weight float64, plastic bool) *Synap
 		InitWeight:   weight, // Store baseline weight for decay
 		MinDecayFrac: 0.1,    // Kept for backward compatibility
 	}
+	// Keep the baseline inside the bounds. A weight beyond ±2 would otherwise
+	// become an out-of-range InitWeight, and inactivity decay pulls toward
+	// InitWeight — so an idle synapse would be dragged *away* from the legal
+	// range until it pinned against the clip.
+	normalizeSynapse(synapse)
 	l.AddSynapse(synapse)
 	return synapse
 }
@@ -253,7 +258,12 @@ func (l *Lobe) UpdateNeuroemitters(dt float64, chemicals map[string]float64) map
 	return chemicals
 }
 
-func (l *Lobe) Step(dt float64, now int) {
+// Step advances the lobe by dt.
+//
+// fallbackModulators supplies brain-level modulator levels for lobes that do
+// not carry their own, matching what inter-lobe plasticity already does. Pass
+// nil for a standalone lobe.
+func (l *Lobe) Step(dt float64, now int, fallbackModulators map[string]*Modulator) {
 	// Update modulators
 	for _, m := range l.Modulators {
 		m.Step(dt)
@@ -264,11 +274,6 @@ func (l *Lobe) Step(dt float64, now int) {
 		neuron, ok := l.Neurons[nid]
 		if !ok {
 			continue
-		}
-
-		// Wipe the neuron if the lobe doesn't persist between steps
-		if !l.Persists && !neuron.Persists {
-			neuron.ActivationVal = 0.0
 		}
 
 		// Sum inputs from all synapses that target this neuron
@@ -289,31 +294,35 @@ func (l *Lobe) Step(dt float64, now int) {
 		}
 
 		// Compute neuron's new activation value (includes bias and activation func)
-		neuron.Compute(sum, dt)
+		persists := l.Persists || neuron.Persists
+		neuron.Compute(sum, dt, persists)
 
-		// Lobe level decay if configured; DecayRate is per second.
-		neuron.ActivationVal *= decayFactor(l.DecayRate, dt)
-
-		// Update eligibility traces for plastic synapses targeting this neuron
-		// Use presynaptic activation (already updated in topological order) and
-		// postsynaptic activation we just computed
-		for _, s := range l.Synapses {
-			if s.To != nid || !s.Plastic {
-				continue
-			}
-			if pre, ok := l.Neurons[s.From]; ok {
-				// Decaying eligibility trace captures pre-post correlation
-				// Eligibility trace as a proper leaky integrator:
-				//   dTrace/dt = -Trace/tau + pre*post
-				// TraceDecay is the per-second decay rate. The old form
-				// `Trace = TraceDecay*Trace + pre*post` had no dt at all, so both the
-				// accumulation and the time constant scaled with frame rate: the same
-				// simulated second produced a trace of 16 at 15 TPS and 326 at 600.
-				decay := decayFactor(l.PlasticityConfig.TraceDecay, dt)
-				s.Trace = decay*s.Trace + pre.ActivationVal*neuron.ActivationVal*dt
-			}
+		// Lobe level decay, for stateful neurons only. Decaying a stateless
+		// neuron would just rescale its transfer function, since its activation
+		// is entirely determined by this step's input.
+		if persists {
+			neuron.ActivationVal *= decayFactor(l.DecayRate, dt)
 		}
+
 	}
+
+	// Resolve winner-take-all before anything downstream reads activations.
+	//
+	// This used to run last, after traces, emitters and reinforcement, so a
+	// losing neuron reported an activation of 0 while still accumulating
+	// eligibility trace and being reinforced — measured at trace 1.50 and a
+	// weight gain of +1.5 for a neuron the lobe had rejected. Inter-lobe traces
+	// (computed in Brain.Step, after Lobe.Step returns) already saw post-WTA
+	// values, so the two learning paths disagreed about what WTA meant.
+	l.applyWinnerTakesAll()
+
+	// Update eligibility traces, using post-WTA activations so a silenced
+	// neuron accumulates nothing.
+	//
+	// This used to run inside the neuron loop above, before WTA had resolved,
+	// so a losing neuron reported an activation of 0 while its incoming
+	// synapses still built trace and were reinforced.
+	l.updateTraces(dt)
 
 	// Send activation from neurons to neuroemitters via synapses
 	// This happens after all neurons have been updated
@@ -321,46 +330,54 @@ func (l *Lobe) Step(dt float64, now int) {
 		for _, s := range l.Synapses {
 			if emitter := l.GetEmitter(s.To); emitter != nil {
 				if pre, ok := l.Neurons[s.From]; ok {
-					emitter.ReceiveInput(pre.ActivationVal * s.Weight)
+					contribution := pre.ActivationVal * s.Weight
+
+					// Mark usage and update the trace, exactly as for a
+					// neuron-targeted synapse.
+					//
+					// The loops above filter on l.Neurons, so an
+					// emitter-targeted synapse used to get no LastUsed, no
+					// UsageCount and no trace — while applyInactivityDecay
+					// still saw it as permanently unused and dragged it back to
+					// InitWeight forever. Such a synapse could only ever decay,
+					// never learn.
+					if contribution != 0.0 {
+						s.LastUsed = now
+						s.UsageCount++
+					}
+					if s.Plastic {
+						// The emitter's "activation" is the input it is
+						// receiving; it has no activation value of its own.
+						decay := decayFactor(l.PlasticityConfig.TraceDecay, dt)
+						s.Trace = decay*s.Trace + pre.ActivationVal*contribution*dt
+					}
+
+					emitter.ReceiveInput(contribution)
 				}
 			}
 		}
 	}
 
 	// Apply multi-modal reinforcement learning
-	l.applyReinforcementLearning(dt)
+	l.applyReinforcementLearning(dt, fallbackModulators)
 
 	// Apply inactivity-based synaptic decay
 	l.applyInactivityDecay(dt, now)
 
-	if l.WinnerTakesAll {
-		var maxNeuron *Neuron
-		for _, neuron := range l.Neurons {
-			if maxNeuron == nil || neuron.ActivationVal > maxNeuron.ActivationVal {
-				maxNeuron = neuron
-			}
-		}
-
-		for _, neuron := range l.Neurons {
-			if neuron != maxNeuron {
-				neuron.ActivationVal = 0.0
-			}
-		}
-	}
 }
 
 // applyReinforcementLearning applies reward and punishment signals to plastic synapses
-func (l *Lobe) applyReinforcementLearning(dt float64) {
-	// Get current chemical levels
-	dopamineLevel := 0.0
-	serotoninLevel := 0.0
-
-	if d, ok := l.Modulators[Dopamine]; ok {
-		dopamineLevel = d.Level
-	}
-	if s, ok := l.Modulators[Serotonin]; ok {
-		serotoninLevel = s.Level
-	}
+func (l *Lobe) applyReinforcementLearning(dt float64, fallback map[string]*Modulator) {
+	// Get current chemical levels, falling back to the brain's modulators when
+	// this lobe has none of its own.
+	//
+	// Brain.Reinforce's documentation has always promised this ("affects all
+	// inter-lobe synapses and any lobes that don't have their own modulators"),
+	// but only the inter-lobe path implemented it — a global dopamine signal
+	// left intra-lobe weights untouched no matter how large the trace. Two
+	// reinforcement policies in one brain.
+	dopamineLevel := modulatorLevel(l.Modulators, fallback, Dopamine)
+	serotoninLevel := modulatorLevel(l.Modulators, fallback, Serotonin)
 
 	// Apply reinforcement to each plastic synapse
 	for _, s := range l.Synapses {
@@ -460,4 +477,64 @@ func (l *Lobe) Reinforce(chemicalName string, amount float64) {
 	}
 
 	m.Add(amount)
+}
+
+// modulatorLevel reads a modulator from the lobe's own set, falling back to the
+// brain's.
+func modulatorLevel(own, fallback map[string]*Modulator, name string) float64 {
+	if m, ok := own[name]; ok {
+		return m.Level
+	}
+	if m, ok := fallback[name]; ok {
+		return m.Level
+	}
+	return 0.0
+}
+
+// applyWinnerTakesAll zeroes every neuron but the most active one.
+//
+// Ties are broken by neuron ID so the outcome does not depend on Go's
+// randomised map iteration order.
+func (l *Lobe) applyWinnerTakesAll() {
+	if !l.WinnerTakesAll {
+		return
+	}
+
+	winner := ""
+	var best float64
+	for id, neuron := range l.Neurons {
+		if winner == "" || neuron.ActivationVal > best || (neuron.ActivationVal == best && id < winner) {
+			winner, best = id, neuron.ActivationVal
+		}
+	}
+
+	for id, neuron := range l.Neurons {
+		if id != winner {
+			neuron.ActivationVal = 0.0
+		}
+	}
+}
+
+// updateTraces advances the eligibility trace of every plastic intra-lobe
+// synapse, as a leaky integrator:
+//
+//	dTrace/dt = -Trace/tau + pre*post
+//
+// TraceDecay is the per-second decay rate. The old form
+// `Trace = TraceDecay*Trace + pre*post` had no dt at all, so both the
+// accumulation and the time constant scaled with frame rate: the same simulated
+// second produced a trace of 16 at 15 TPS and 326 at 600.
+func (l *Lobe) updateTraces(dt float64) {
+	decay := decayFactor(l.PlasticityConfig.TraceDecay, dt)
+	for _, s := range l.Synapses {
+		if !s.Plastic {
+			continue
+		}
+		pre, okFrom := l.Neurons[s.From]
+		post, okTo := l.Neurons[s.To]
+		if !okFrom || !okTo {
+			continue // emitter targets are handled alongside emission
+		}
+		s.Trace = decay*s.Trace + pre.ActivationVal*post.ActivationVal*dt
+	}
 }

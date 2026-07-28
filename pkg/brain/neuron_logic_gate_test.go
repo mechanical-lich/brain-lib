@@ -38,7 +38,7 @@ func TestNeuronAND(t *testing.T) {
 		b.ExternalInput = tc.inputs[1]
 
 		// Run one step
-		l.Step(0.1, 0)
+		l.Step(0.1, 0, nil)
 
 		// Check output
 		assert.InDelta(t, tc.expected, l.GetNeuron("C").ActivationVal, 1e-6, "inputs: %v, output: %v", tc.inputs, l.GetNeuron("C").ActivationVal)
@@ -72,7 +72,7 @@ func TestNeuronOR(t *testing.T) {
 		b.ExternalInput = tc.inputs[1]
 
 		// Run one step
-		l.Step(0.1, 0)
+		l.Step(0.1, 0, nil)
 
 		// Check output
 		assert.InDelta(t, tc.expected, l.GetNeuron("C").ActivationVal, 1e-6, "inputs: %v, output: %v", tc.inputs, l.GetNeuron("C").ActivationVal)
@@ -102,7 +102,7 @@ func TestNeuronNOT(t *testing.T) {
 		a.ExternalInput = tc.inputs[0]
 
 		// Run one step
-		l.Step(0.1, 0)
+		l.Step(0.1, 0, nil)
 
 		// Check output
 		assert.InDelta(t, tc.expected, l.GetNeuron("C").ActivationVal, 1e-6, "inputs: %v, output: %v", tc.inputs, l.GetNeuron("C").ActivationVal)
@@ -136,7 +136,7 @@ func TestNeuronNOR(t *testing.T) {
 		b.ExternalInput = tc.inputs[1]
 
 		// Run one step
-		l.Step(0.1, 0)
+		l.Step(0.1, 0, nil)
 
 		// Check output
 		assert.InDelta(t, tc.expected, l.GetNeuron("C").ActivationVal, 1e-6, "inputs: %v, actual output: %v, expected output: %v", tc.inputs, l.GetNeuron("C").ActivationVal, tc.expected)
@@ -170,7 +170,7 @@ func TestNeuronNAND(t *testing.T) {
 		b.ExternalInput = tc.inputs[1]
 
 		// Run one step
-		l.Step(0.1, 0)
+		l.Step(0.1, 0, nil)
 
 		// Check output
 		assert.InDelta(t, tc.expected, l.GetNeuron("C").ActivationVal, 1e-6, "inputs: %v, actual output: %v, expected output: %v", tc.inputs, l.GetNeuron("C").ActivationVal, tc.expected)
@@ -226,7 +226,7 @@ func TestNeuronXNOR(t *testing.T) {
 		b.ExternalInput = tc.inputs[1]
 
 		// Run one step
-		l.Step(0.1, 0)
+		l.Step(0.1, 0, nil)
 
 		// Check output
 		assert.InDelta(t, tc.expected, l.GetNeuron("C").ActivationVal, 1e-6, "inputs: %v, actual output: %v, expected output: %v", tc.inputs, l.GetNeuron("C").ActivationVal, tc.expected)

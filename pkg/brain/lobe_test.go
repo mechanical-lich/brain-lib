@@ -75,7 +75,7 @@ func TestStepPropagation(t *testing.T) {
 	l.Connect("B", "C", 0.5, false)
 
 	// Run one step
-	l.Step(0.1, 0)
+	l.Step(0.1, 0, nil)
 
 	// After step: A should be 1.0 (from bias), B should be 0.5, C should be 0.25
 	assert.InDelta(t, 1.0, l.GetNeuron("A").ActivationVal, 1e-6)
@@ -96,11 +96,11 @@ func TestPlasticityHebbian(t *testing.T) {
 	syn := l.Connect("pre", "post", 0.1, true)
 
 	// Run one step to build eligibility trace
-	l.Step(0.1, 0)
+	l.Step(0.1, 0, nil)
 
 	// Apply reward and run another step
 	l.Reinforce(Dopamine, 1.0)
-	l.Step(0.1, 1)
+	l.Step(0.1, 1, nil)
 
 	after := l.GetSynapse(syn.ID).Weight
 	assert.Greater(t, after, 0.1, "expected synapse weight to increase due to reinforcement plasticity")
@@ -119,11 +119,11 @@ func TestPlasticityPunishment(t *testing.T) {
 	syn := l.Connect("pre", "post", 0.5, true)
 
 	// Run one step to build eligibility trace
-	l.Step(0.1, 0)
+	l.Step(0.1, 0, nil)
 
 	// Apply punishment (serotonin) and run another step
 	l.Reinforce(Serotonin, 1.0)
-	l.Step(0.1, 1)
+	l.Step(0.1, 1, nil)
 
 	after := l.GetSynapse(syn.ID).Weight
 	assert.Less(t, after, 0.5, "expected synapse weight to decrease due to punishment")

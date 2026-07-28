@@ -85,7 +85,7 @@ func TestNeuroemitter_InLobe(t *testing.T) {
 	lobe.AddSynapse(syn2)
 
 	// Step the lobe (this should send neuron activations to emitter)
-	lobe.Step(0.1, 0)
+	lobe.Step(0.1, 0, nil)
 
 	// Update neuroemitters and check chemical production
 	chemicals := make(map[string]float64)
@@ -116,7 +116,7 @@ func TestNeuroemitter_MultipleEmittersToSameChemical(t *testing.T) {
 	lobe.AddSynapse(syn2)
 
 	// Step the lobe
-	lobe.Step(0.1, 0)
+	lobe.Step(0.1, 0, nil)
 
 	// Update neuroemitters
 	chemicals := make(map[string]float64)

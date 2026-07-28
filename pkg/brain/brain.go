@@ -87,7 +87,7 @@ func (b *Brain) Step(dt float64) {
 		}
 
 		// Now step this lobe once so it consumes external inputs and computes activations
-		lobe.Step(dt, b.Tick)
+		lobe.Step(dt, b.Tick, b.Modulators)
 
 		// Update eligibility traces for plastic cross-lobe synapses targeting this lobe
 		// Do this after the lobe has computed its new activations
@@ -414,12 +414,69 @@ func LoadFromJson(data []byte) (*Brain, error) {
 		brain.PlasticityConfig = DefaultPlasticityConfig()
 	}
 
+	for key, lobe := range brain.Lobes {
+		if lobe == nil {
+			continue
+		}
+
+		// A lobe's name is the map key. The two used to be able to disagree,
+		// and Step read them inconsistently — `ToLobe` was matched against
+		// lobe.Name (brain.go:61) while `FromLobe` was matched against the map
+		// key (:68). A file whose key and name differed gave a lobe that worked
+		// as a synapse source but was silently inert as a target.
+		if lobe.Name != key {
+			lobe.Name = key
+		}
+
+		// Default the lobe's plasticity config too, not just the brain's.
+		// Without this a lobe whose JSON omits plasticity_config loads with an
+		// all-zero config, so its intra-lobe learning is silently off while
+		// inter-lobe learning still runs via the brain-level fallback.
+		if lobe.PlasticityConfig.TraceDecay == 0 {
+			lobe.PlasticityConfig = brain.PlasticityConfig
+		}
+
+		for _, syn := range lobe.Synapses {
+			normalizeSynapse(syn)
+		}
+	}
+
+	for _, syn := range brain.Synapses {
+		normalizeSynapse(syn)
+	}
+
 	brain.updateLobeOrder()
 	for _, lobe := range brain.Lobes {
 		lobe.updateNeuronOrder()
 	}
 
 	return &brain, nil
+}
+
+// normalizeSynapse repairs a synapse whose baseline sits outside its own bounds.
+//
+// applyInactivityDecay moves an unused weight toward InitWeight. If InitWeight
+// is outside [MinWeight, MaxWeight] that pull points away from the legal range,
+// so idling *strengthens* the synapse until it pins against the clip —
+// InitWeight 50 with a [-2,2] clip drove an idle weight to +2. Lobe.Connect
+// produces exactly this whenever it is handed a weight beyond the default
+// bounds, since it copies weight into InitWeight unchecked.
+func normalizeSynapse(syn *Synapse) {
+	if syn == nil || syn.MinWeight >= syn.MaxWeight {
+		return // bounds unset or inverted; nothing meaningful to clamp against
+	}
+	syn.InitWeight = clampFloat(syn.InitWeight, syn.MinWeight, syn.MaxWeight)
+	syn.Weight = clampFloat(syn.Weight, syn.MinWeight, syn.MaxWeight)
+}
+
+func clampFloat(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 func LoadBrain(filePath string) (*Brain, error) {

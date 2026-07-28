@@ -50,35 +50,69 @@ type Neuron struct {
 	GroupID int `json:"group_id,omitempty"`
 }
 
-func (n *Neuron) Compute(sum float64, dt float64) float64 {
+// Compute updates the neuron's activation from its summed synaptic input.
+//
+// persists says whether this neuron retains state between steps, which is the
+// lobe's Persists OR'd with the neuron's own.
+//
+// The activation used to only ever ratchet *upward* within a step
+// (`if n.ActivationVal < out`), then decay. That had three consequences:
+// a persisting neuron driven high never followed its input back down (measured:
+// driven to 1.98, input dropped to 0.5, activation stayed 1.97); negative
+// activations were unreachable, so Neuron.Min was dead and inhibitory synapses
+// could only cancel excitation rather than invert it (measured: an input of -5
+// against Min=-2 produced 0.0); and Threshold skipped the update instead of
+// suppressing the signal, contradicting its own documentation.
+func (n *Neuron) Compute(sum float64, dt float64, persists bool) float64 {
 	v := sum + n.Bias + n.ExternalInput
 	out := applyActivation(n.Activation, v)
+	n.ExternalInput = 0.0 // reset after use
 
-	if n.Capacitor {
-		// Capacitor mode: integrate input into activation if above threshold.
-		// Scaled by dt so charge accumulates per second rather than per frame —
-		// it was the one term in this function that was still frame-rate
-		// dependent.
-		if out >= n.Threshold {
-			n.ActivationVal += out * dt
-		}
-	} else {
-		// Standard mode: only update if new value is higher
-		if n.ActivationVal < out && out >= n.Threshold {
-			n.ActivationVal = out
-		}
+	// Threshold gates on magnitude, so it suppresses weak signals of either
+	// sign rather than discarding every negative one.
+	if math.Abs(out) < n.Threshold {
+		out = 0
 	}
 
-	// Exponential decay; DecayRate is per second.
-	n.ActivationVal *= decayFactor(n.DecayRate, dt)
+	switch {
+	case n.Capacitor:
+		// Integrate input over time, then leak. Scaled by dt so charge
+		// accumulates per second rather than per frame.
+		n.ActivationVal += out * dt
+		n.ActivationVal *= decayFactor(n.DecayRate, dt)
 
-	n.ExternalInput = 0.0 // reset after use
+	case persists:
+		// Relax toward the current input, with DecayRate as the time constant.
+		// This is what makes a persisting neuron a low-pass filter of its input
+		// rather than a max-hold: it rises *and* falls toward what it is being
+		// told, just slowly.
+		f := decayFactor(n.DecayRate, dt)
+		n.ActivationVal = out + (n.ActivationVal-out)*f
+
+	default:
+		// Stateless neuron: activation is purely a function of this step's
+		// input.
+		n.ActivationVal = out
+	}
 
 	if n.Max != 0 && n.ActivationVal > n.Max {
 		n.ActivationVal = n.Max
 	}
-	if n.Min != 0 && n.ActivationVal < n.Min {
-		n.ActivationVal = n.Min
+
+	// Rectify at zero unless a negative Min is explicitly configured.
+	//
+	// Neurons are used as logic gates throughout the brain — an AND is two
+	// weight-1 inputs and a bias of -1, and the lab's concept builder generates
+	// exactly that shape — so a sub-threshold sum *must* rectify to 0 or every
+	// gate inverts. Setting Min below zero opts an individual neuron into
+	// signed activation, which is what makes Min meaningful and lets an
+	// inhibitory synapse invert rather than merely cancel.
+	floor := 0.0
+	if n.Min < 0 {
+		floor = n.Min
+	}
+	if n.ActivationVal < floor {
+		n.ActivationVal = floor
 	}
 
 	return n.ActivationVal
