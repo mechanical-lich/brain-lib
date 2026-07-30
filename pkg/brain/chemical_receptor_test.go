@@ -134,3 +134,59 @@ func TestChemicalReceptor_ThresholdBehavior(t *testing.T) {
 	assert.InDelta(t, 1.0, out, 1e-9)
 	assert.InDelta(t, 1.0, consumed, 1e-9)
 }
+
+// A normalized receptor must deliver a full 0..1 signal to a neuron.
+//
+// It used to scale the normalized value by dt for every target. A neuron's
+// ExternalInput is consumed and zeroed on each Compute, so that capped the
+// signal at dt — 0.1 at the game's step, against drive neurons that all run
+// 0..1. A chemical drive could not compete with hunger no matter how strong the
+// concentration.
+func TestChemicalReceptor_NormalizedNeuronOutputIsALevelNotARate(t *testing.T) {
+	cr := &ChemicalReceptor{
+		ChemicalName:           "testosterone",
+		UptakeRate:             0.01,
+		Target:                 "libido",
+		TargetType:             TargetTypeNeuron,
+		ReceptorType:           ReceptorTypeExcitatory,
+		OutputNormalizationMin: 0.0,
+		OutputNormalizationMax: 50.0,
+	}
+
+	ch := map[string]float64{"testosterone": 50.0}
+	out, consumed := cr.GetOutput(ch, 0.1)
+
+	assert.InDelta(t, 1.0, out, 1e-9, "a saturated receptor should deliver a full signal")
+	// Draining stays a rate: 50 * 0.01 * 0.1.
+	assert.InDelta(t, 0.05, consumed, 1e-9, "consumption should still scale with dt")
+
+	// Half the range, half the signal, regardless of dt.
+	ch["testosterone"] = 25.0
+	out, _ = cr.GetOutput(ch, 0.1)
+	assert.InDelta(t, 0.5, out, 1e-9)
+	out, _ = cr.GetOutput(ch, 1.0)
+	assert.InDelta(t, 0.5, out, 1e-9, "a neuron's signal must not depend on the step size")
+}
+
+// A modulator integrates what it is handed and decays on its own, so it must
+// keep receiving a rate — otherwise its level would depend on how often the
+// brain is stepped.
+func TestChemicalReceptor_NormalizedModulatorOutputStaysARate(t *testing.T) {
+	cr := &ChemicalReceptor{
+		ChemicalName:           "dopamine",
+		UptakeRate:             0.2,
+		Target:                 "dopamine",
+		TargetType:             TargetTypeModulator,
+		ReceptorType:           ReceptorTypeExcitatory,
+		OutputNormalizationMin: 0.0,
+		OutputNormalizationMax: 10.0,
+	}
+
+	ch := map[string]float64{"dopamine": 10.0}
+	out, _ := cr.GetOutput(ch, 0.1)
+	assert.InDelta(t, 0.1, out, 1e-9)
+
+	ch["dopamine"] = 10.0
+	out, _ = cr.GetOutput(ch, 0.5)
+	assert.InDelta(t, 0.5, out, 1e-9)
+}

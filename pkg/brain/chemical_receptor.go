@@ -104,15 +104,35 @@ func (cr *ChemicalReceptor) GetOutput(chemistry map[string]float64, dt float64) 
 	}
 
 	// Normalize output if min and max are set (based on concentration)
+	//
+	// Whether the normalized value is scaled by dt depends on what it is being
+	// delivered to, because the two target types consume it differently:
+	//
+	//   - A modulator *accumulates* what it is given and decays on its own, so
+	//     it wants a rate. Scaling by dt is what makes its level independent of
+	//     how often the brain is stepped.
+	//   - A neuron's ExternalInput is consumed and zeroed by every Compute, so
+	//     it wants a level, not a rate. Scaling by dt there caps the signal at
+	//     dt itself — at the game's dt of 0.1, a fully saturated receptor
+	//     delivered 0.1 to a neuron whose peers (hunger, pain, boredom) all run
+	//     0..1. The point of normalizing is to produce a 0..1 signal, and for a
+	//     neuron target that is exactly what it should deliver.
+	//
+	// Consumption is unaffected either way: `consumed` stays
+	// concentration*UptakeRate*dt, which is what lets a receptor read a pool
+	// strongly while draining it slowly.
 	output := uptake
 	if cr.OutputNormalizationMin != 0 || cr.OutputNormalizationMax != 0 {
-		if concentration <= cr.OutputNormalizationMin {
-			output = 0.0
-		} else if concentration >= cr.OutputNormalizationMax {
-			output = 1.0 * dt
-		} else {
-			// normalize concentration into [0,1] then scale by dt
-			output = ((concentration - cr.OutputNormalizationMin) / (cr.OutputNormalizationMax - cr.OutputNormalizationMin)) * dt
+		normalized := 0.0
+		if concentration >= cr.OutputNormalizationMax {
+			normalized = 1.0
+		} else if concentration > cr.OutputNormalizationMin {
+			normalized = (concentration - cr.OutputNormalizationMin) / (cr.OutputNormalizationMax - cr.OutputNormalizationMin)
+		}
+
+		output = normalized
+		if cr.TargetType == TargetTypeModulator {
+			output = normalized * dt
 		}
 	}
 
