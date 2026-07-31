@@ -213,13 +213,13 @@ func TestPersistingNeuronTracksInputDownward(t *testing.T) {
 	n := &Neuron{ID: "n", Persists: true, Activation: ActLinear, DecayRate: 5.0}
 
 	for i := 0; i < 60; i++ {
-		n.Compute(2.0, 1.0/60, true)
+		n.Compute(2.0, 1.0/60, true, n.EffectiveDecayRate(0))
 	}
 	peak := n.ActivationVal
 	require.Greater(t, peak, 1.5)
 
 	for i := 0; i < 60; i++ {
-		n.Compute(0.5, 1.0/60, true)
+		n.Compute(0.5, 1.0/60, true, n.EffectiveDecayRate(0))
 	}
 
 	assert.Less(t, n.ActivationVal, peak*0.75,
@@ -232,7 +232,7 @@ func TestPersistingNeuronTracksInputDownward(t *testing.T) {
 func TestNegativeActivationRequiresExplicitMin(t *testing.T) {
 	t.Run("opted in", func(t *testing.T) {
 		n := &Neuron{ID: "n", Activation: ActLinear, Min: -2}
-		n.Compute(-5.0, 1.0/60, false)
+		n.Compute(-5.0, 1.0/60, false, n.EffectiveDecayRate(0))
 		assert.Equal(t, -2.0, n.ActivationVal, "Min should be reachable when set below zero")
 	})
 
@@ -240,7 +240,7 @@ func TestNegativeActivationRequiresExplicitMin(t *testing.T) {
 	// from logic gates that need a sub-threshold sum to land on 0.
 	t.Run("default rectifies", func(t *testing.T) {
 		n := &Neuron{ID: "n", Activation: ActLinear}
-		n.Compute(-5.0, 1.0/60, false)
+		n.Compute(-5.0, 1.0/60, false, n.EffectiveDecayRate(0))
 		assert.Equal(t, 0.0, n.ActivationVal, "without an explicit Min a neuron stays rectified")
 	})
 }

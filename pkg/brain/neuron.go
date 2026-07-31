@@ -53,10 +53,33 @@ type Neuron struct {
 	GroupID int `json:"group_id,omitempty"`
 }
 
+// EffectiveDecayRate resolves this neuron's decay rate against its lobe's.
+//
+// A lobe's DecayRate is a *default* for the neurons that do not set one of their
+// own, not an extra decay applied on top. It used to be both: Compute applied
+// the neuron's rate and Lobe.Step then multiplied by the lobe's, so the two
+// stacked and a neuron could only ever decay faster than its lobe, never slower.
+// Setting `decay_rate: 0.005` on a neuron in a lobe running 0.05 bought a 10%
+// change instead of the 10x it reads as, which made per-neuron rates all but
+// useless — and made a long-lived memory impossible to express in a lobe of
+// short-lived ones.
+//
+// Zero means "unset". A neuron that genuinely should never decay needs a lobe
+// that does not either; the validator reports that pairing as
+// Frozen_Persisting_Neuron.
+func (n *Neuron) EffectiveDecayRate(lobeRate float64) float64 {
+	if n.DecayRate > 0 {
+		return n.DecayRate
+	}
+	return lobeRate
+}
+
 // Compute updates the neuron's activation from its summed synaptic input.
 //
 // persists says whether this neuron retains state between steps, which is the
-// lobe's Persists OR'd with the neuron's own.
+// lobe's Persists OR'd with the neuron's own. decayRate is the resolved rate
+// from EffectiveDecayRate; a caller holding a lobe should pass that rather than
+// the neuron's raw DecayRate.
 //
 // The activation used to only ever ratchet *upward* within a step
 // (`if n.ActivationVal < out`), then decay. That had three consequences:
@@ -66,7 +89,7 @@ type Neuron struct {
 // could only cancel excitation rather than invert it (measured: an input of -5
 // against Min=-2 produced 0.0); and Threshold skipped the update instead of
 // suppressing the signal, contradicting its own documentation.
-func (n *Neuron) Compute(sum float64, dt float64, persists bool) float64 {
+func (n *Neuron) Compute(sum float64, dt float64, persists bool, decayRate float64) float64 {
 	v := sum + n.Bias + n.ExternalInput
 	out := applyActivation(n.Activation, v)
 	n.ExternalInput = 0.0 // reset after use
@@ -82,7 +105,7 @@ func (n *Neuron) Compute(sum float64, dt float64, persists bool) float64 {
 		// Integrate input over time, then leak. Scaled by dt so charge
 		// accumulates per second rather than per frame.
 		n.ActivationVal += out * dt
-		n.ActivationVal *= decayFactor(n.DecayRate, dt)
+		n.ActivationVal *= decayFactor(decayRate, dt)
 
 	case persists:
 		// Asymmetric: a stronger signal is taken immediately, a weaker one is
@@ -107,13 +130,14 @@ func (n *Neuron) Compute(sum float64, dt float64, persists bool) float64 {
 		// activation (Min < 0) responds to a strong inhibitory signal just as
 		// promptly as to a strong excitatory one.
 		//
-		// DecayRate 0 therefore means "rise instantly, never fall" — coherent,
-		// but a neuron that can only climb. The validator reports it as
+		// A resolved rate of 0 therefore means "rise instantly, never fall" —
+		// coherent, but a neuron that can only climb. That requires both the
+		// neuron and its lobe to be unset; the validator reports it as
 		// Frozen_Persisting_Neuron.
 		if math.Abs(out) >= math.Abs(n.ActivationVal) {
 			n.ActivationVal = out
 		} else {
-			f := decayFactor(n.DecayRate, dt)
+			f := decayFactor(decayRate, dt)
 			n.ActivationVal = out + (n.ActivationVal-out)*f
 		}
 

@@ -206,12 +206,17 @@ func validateStructure(b *brain.Brain) []Complaint {
 			}
 		}
 
-		// A persisting neuron relaxes toward its input with DecayRate as the
-		// time constant, so a rate of 0 is an infinite time constant: it holds
-		// whatever value it has forever and is deaf to everything feeding it.
-		// Coherent, but almost never what an author means.
+		// A persisting neuron relaxes toward its input with its decay rate as
+		// the time constant, so a rate of 0 is an infinite time constant: it
+		// holds whatever value it has forever and is deaf to everything feeding
+		// it. Coherent, but almost never what an author means.
+		//
+		// Resolved against the lobe, which supplies the default for any neuron
+		// that sets no rate of its own. Checking the neuron's raw DecayRate
+		// reported every neuron in a lobe that had a perfectly good rate — the
+		// shipped critter brain's four emotion neurons among them.
 		for id, n := range lobe.Neurons {
-			if (lobe.Persists || n.Persists) && !n.Capacitor && n.DecayRate <= 0 {
+			if (lobe.Persists || n.Persists) && !n.Capacitor && n.EffectiveDecayRate(lobe.DecayRate) <= 0 {
 				add(Frozen_Persisting_Neuron, key+"."+id)
 			}
 		}

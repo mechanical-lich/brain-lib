@@ -309,16 +309,13 @@ func (l *Lobe) Step(dt float64, now int, fallbackModulators map[string]*Modulato
 			}
 		}
 
-		// Compute neuron's new activation value (includes bias and activation func)
+		// Compute neuron's new activation value (includes bias and activation
+		// func). The lobe's DecayRate is the default for neurons that set none
+		// of their own — it is resolved here and applied once inside Compute,
+		// rather than being multiplied in again afterwards. See
+		// Neuron.EffectiveDecayRate.
 		persists := l.Persists || neuron.Persists
-		neuron.Compute(sum, dt, persists)
-
-		// Lobe level decay, for stateful neurons only. Decaying a stateless
-		// neuron would just rescale its transfer function, since its activation
-		// is entirely determined by this step's input.
-		if persists {
-			neuron.ActivationVal *= decayFactor(l.DecayRate, dt)
-		}
+		neuron.Compute(sum, dt, persists, neuron.EffectiveDecayRate(l.DecayRate))
 
 	}
 
