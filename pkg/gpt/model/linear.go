@@ -33,12 +33,15 @@ func (l *Linear) Forward(x *tensor.Mat) *tensor.Mat {
 // Backward accumulates dW, db and returns dx given dy [n, out].
 func (l *Linear) Backward(dy *tensor.Mat) *tensor.Mat {
 	l.W.Grad.Add(tensor.MatMulTA(l.x, dy))
-	bg := l.B.Grad.Data
-	for i := 0; i < dy.Rows; i++ {
-		for j, v := range dy.Row(i) {
-			bg[j] += v
+	// db += column sums of dy, accumulated per chunk and folded in order.
+	parallelRows(dy.Rows, dy.Cols, [][]float64{l.B.Grad.Data}, func(lo, hi int, acc [][]float64) {
+		bg := acc[0]
+		for i := lo; i < hi; i++ {
+			for j, v := range dy.Row(i) {
+				bg[j] += v
+			}
 		}
-	}
+	})
 	return tensor.MatMulT(dy, l.W.Value)
 }
 

@@ -29,18 +29,27 @@ func NewMLP(name string, cfg Config, rng *rand.Rand) *MLP {
 func (m *MLP) Forward(x *tensor.Mat) *tensor.Mat {
 	m.pre = m.FC.Forward(x)
 	act := tensor.New(m.pre.Rows, m.pre.Cols)
-	for i, v := range m.pre.Data {
-		act.Data[i] = gelu(v)
-	}
+	// Element-wise, so split the flat data across workers in row chunks.
+	cols := m.pre.Cols
+	tensor.Parallel(m.pre.Rows, func(lo, hi int) {
+		src, dst := m.pre.Data[lo*cols:hi*cols], act.Data[lo*cols:hi*cols]
+		for i, v := range src {
+			dst[i] = gelu(v)
+		}
+	})
 	return m.Proj.Forward(act)
 }
 
 // Backward returns dx given dy [n, D].
 func (m *MLP) Backward(dy *tensor.Mat) *tensor.Mat {
 	dAct := m.Proj.Backward(dy)
-	for i, v := range m.pre.Data {
-		dAct.Data[i] *= geluGrad(v)
-	}
+	cols := m.pre.Cols
+	tensor.Parallel(m.pre.Rows, func(lo, hi int) {
+		pre, d := m.pre.Data[lo*cols:hi*cols], dAct.Data[lo*cols:hi*cols]
+		for i, v := range pre {
+			d[i] *= geluGrad(v)
+		}
+	})
 	return m.FC.Backward(dAct)
 }
 

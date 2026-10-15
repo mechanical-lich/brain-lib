@@ -35,28 +35,30 @@ func (ln *LayerNorm) Forward(x *tensor.Mat) *tensor.Mat {
 	ln.rstd = make([]float64, n)
 	y := tensor.New(n, d)
 	g, b := ln.G.Value.Data, ln.B.Value.Data
-	for i := 0; i < n; i++ {
-		row := x.Row(i)
-		var mean float64
-		for _, v := range row {
-			mean += v
+	tensor.Parallel(n, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			row := x.Row(i)
+			var mean float64
+			for _, v := range row {
+				mean += v
+			}
+			mean /= float64(d)
+			var variance float64
+			for _, v := range row {
+				dv := v - mean
+				variance += dv * dv
+			}
+			variance /= float64(d)
+			rstd := 1 / math.Sqrt(variance+ln.Eps)
+			ln.rstd[i] = rstd
+			xh := ln.xhat.Row(i)
+			yr := y.Row(i)
+			for j, v := range row {
+				xh[j] = (v - mean) * rstd
+				yr[j] = xh[j]*g[j] + b[j]
+			}
 		}
-		mean /= float64(d)
-		var variance float64
-		for _, v := range row {
-			dv := v - mean
-			variance += dv * dv
-		}
-		variance /= float64(d)
-		rstd := 1 / math.Sqrt(variance+ln.Eps)
-		ln.rstd[i] = rstd
-		xh := ln.xhat.Row(i)
-		yr := y.Row(i)
-		for j, v := range row {
-			xh[j] = (v - mean) * rstd
-			yr[j] = xh[j]*g[j] + b[j]
-		}
-	}
+	})
 	return y
 }
 
@@ -65,27 +67,31 @@ func (ln *LayerNorm) Backward(dy *tensor.Mat) *tensor.Mat {
 	n, d := dy.Rows, dy.Cols
 	dx := tensor.New(n, d)
 	g := ln.G.Value.Data
-	dg, db := ln.G.Grad.Data, ln.B.Grad.Data
-	for i := 0; i < n; i++ {
-		dyr := dy.Row(i)
-		xh := ln.xhat.Row(i)
-		// dxhat = dy * g; dx = rstd * (dxhat - mean(dxhat) - xhat * mean(dxhat * xhat))
-		var sumDxhat, sumDxhatXhat float64
-		for j, v := range dyr {
-			dg[j] += v * xh[j]
-			db[j] += v
-			dxh := v * g[j]
-			sumDxhat += dxh
-			sumDxhatXhat += dxh * xh[j]
+	// dg and db are sums over rows, so each chunk accumulates its own and
+	// parallelRows folds them into the parameter gradients afterwards.
+	parallelRows(n, d, [][]float64{ln.G.Grad.Data, ln.B.Grad.Data}, func(lo, hi int, acc [][]float64) {
+		dg, db := acc[0], acc[1]
+		for i := lo; i < hi; i++ {
+			dyr := dy.Row(i)
+			xh := ln.xhat.Row(i)
+			// dxhat = dy * g; dx = rstd * (dxhat - mean(dxhat) - xhat * mean(dxhat * xhat))
+			var sumDxhat, sumDxhatXhat float64
+			for j, v := range dyr {
+				dg[j] += v * xh[j]
+				db[j] += v
+				dxh := v * g[j]
+				sumDxhat += dxh
+				sumDxhatXhat += dxh * xh[j]
+			}
+			meanDxhat := sumDxhat / float64(d)
+			meanDxhatXhat := sumDxhatXhat / float64(d)
+			dxr := dx.Row(i)
+			for j, v := range dyr {
+				dxh := v * g[j]
+				dxr[j] = ln.rstd[i] * (dxh - meanDxhat - xh[j]*meanDxhatXhat)
+			}
 		}
-		meanDxhat := sumDxhat / float64(d)
-		meanDxhatXhat := sumDxhatXhat / float64(d)
-		dxr := dx.Row(i)
-		for j, v := range dyr {
-			dxh := v * g[j]
-			dxr[j] = ln.rstd[i] * (dxh - meanDxhat - xh[j]*meanDxhatXhat)
-		}
-	}
+	})
 	return dx
 }
 
