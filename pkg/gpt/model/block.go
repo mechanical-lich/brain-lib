@@ -31,21 +31,23 @@ func NewBlock(idx int, cfg Config, rng *rand.Rand) *Block {
 
 // Forward applies the block to x [B*T, D].
 func (b *Block) Forward(x *tensor.Mat, batch, seq int) *tensor.Mat {
-	h := x.Clone()
-	h.Add(b.Attn.Forward(b.LN1.Forward(x), batch, seq))
-	out := h.Clone()
-	out.Add(b.MLP.Forward(b.LN2.Forward(h)))
+	// Each sub-layer returns a fresh matrix, so the residual is added into
+	// it in place rather than cloning x first.
+	h := b.Attn.Forward(b.LN1.Forward(x), batch, seq)
+	h.Add(x)
+	out := b.MLP.Forward(b.LN2.Forward(h))
+	out.Add(h)
 	return out
 }
 
 // Backward returns dx given dy [B*T, D].
 func (b *Block) Backward(dy *tensor.Mat) *tensor.Mat {
 	// out = h + MLP(LN2(h))  =>  dh = dy + LN2'(MLP'(dy))
-	dh := dy.Clone()
-	dh.Add(b.LN2.Backward(b.MLP.Backward(dy)))
+	dh := b.LN2.Backward(b.MLP.Backward(dy))
+	dh.Add(dy)
 	// h = x + Attn(LN1(x))   =>  dx = dh + LN1'(Attn'(dh))
-	dx := dh.Clone()
-	dx.Add(b.LN1.Backward(b.Attn.Backward(dh)))
+	dx := b.LN1.Backward(b.Attn.Backward(dh))
+	dx.Add(dh)
 	return dx
 }
 

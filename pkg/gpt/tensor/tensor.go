@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"runtime"
 	"sync"
+	"sync/atomic"
 )
 
 // Mat is a dense row-major matrix.
@@ -143,71 +144,6 @@ func (m *Mat) mustMatch(o *Mat) {
 	}
 }
 
-// MatMul returns a @ b for a [n,k] and b [k,m].
-func MatMul(a, b *Mat) *Mat {
-	if a.Cols != b.Rows {
-		panic(fmt.Sprintf("tensor: MatMul %s @ %s", a.Shape(), b.Shape()))
-	}
-	out := New(a.Rows, b.Cols)
-	Parallel(a.Rows, func(lo, hi int) {
-		for i := lo; i < hi; i++ {
-			ai := a.Row(i)
-			oi := out.Row(i)
-			for k, aik := range ai {
-				if aik == 0 {
-					continue
-				}
-				bk := b.Row(k)
-				for j, bkj := range bk {
-					oi[j] += aik * bkj
-				}
-			}
-		}
-	})
-	return out
-}
-
-// MatMulT returns a @ b^T for a [n,k] and b [m,k].
-func MatMulT(a, b *Mat) *Mat {
-	if a.Cols != b.Cols {
-		panic(fmt.Sprintf("tensor: MatMulT %s @ %s^T", a.Shape(), b.Shape()))
-	}
-	out := New(a.Rows, b.Rows)
-	Parallel(a.Rows, func(lo, hi int) {
-		for i := lo; i < hi; i++ {
-			ai := a.Row(i)
-			oi := out.Row(i)
-			for j := 0; j < b.Rows; j++ {
-				oi[j] = Dot(ai, b.Row(j))
-			}
-		}
-	})
-	return out
-}
-
-// MatMulTA returns a^T @ b for a [k,n] and b [k,m].
-func MatMulTA(a, b *Mat) *Mat {
-	if a.Rows != b.Rows {
-		panic(fmt.Sprintf("tensor: MatMulTA %s^T @ %s", a.Shape(), b.Shape()))
-	}
-	out := New(a.Cols, b.Cols)
-	Parallel(a.Cols, func(lo, hi int) {
-		for i := lo; i < hi; i++ {
-			oi := out.Row(i)
-			for k := 0; k < a.Rows; k++ {
-				aki := a.Data[k*a.Cols+i]
-				if aki == 0 {
-					continue
-				}
-				for j, bkj := range b.Row(k) {
-					oi[j] += aki * bkj
-				}
-			}
-		}
-	})
-	return out
-}
-
 // Dot returns the inner product of two equal-length vectors.
 func Dot(a, b []float64) float64 {
 	var s float64
@@ -219,28 +155,39 @@ func Dot(a, b []float64) float64 {
 
 // Parallel splits [0, n) into contiguous chunks and runs fn on each chunk,
 // using goroutines when n is large enough to be worth it.
+//
+// Chunks are handed out dynamically rather than split evenly up front: on
+// machines that mix fast and slow cores an equal split leaves the fast ones
+// idle while the slow ones finish, so each worker keeps pulling the next
+// chunk until none are left.
 func Parallel(n int, fn func(lo, hi int)) {
 	workers := runtime.GOMAXPROCS(0)
-	const minPerWorker = 8
-	if n < 2*minPerWorker || workers <= 1 {
+	if n < 2 || workers <= 1 {
 		fn(0, n)
 		return
 	}
-	if workers > n/minPerWorker {
-		workers = n / minPerWorker
-	}
-	chunk := (n + workers - 1) / workers
-	var wg sync.WaitGroup
-	for lo := 0; lo < n; lo += chunk {
-		hi := lo + chunk
-		if hi > n {
-			hi = n
+	const chunksPerWorker = 4
+	chunks := min(n, chunksPerWorker*workers)
+	chunk := (n + chunks - 1) / chunks
+	workers = min(workers, chunks)
+	var next atomic.Int64
+	work := func() {
+		for {
+			lo := int(next.Add(1)-1) * chunk
+			if lo >= n {
+				return
+			}
+			fn(lo, min(lo+chunk, n))
 		}
-		wg.Add(1)
-		go func(lo, hi int) {
-			defer wg.Done()
-			fn(lo, hi)
-		}(lo, hi)
 	}
+	var wg sync.WaitGroup
+	for w := 1; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			work()
+		}()
+	}
+	work()
 	wg.Wait()
 }

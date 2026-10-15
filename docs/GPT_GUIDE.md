@@ -95,8 +95,10 @@ dx  = dy @ W^T          tensor.MatMulT(dy, W)
 ```
 
 The three matmul variants in `tensor` (`MatMul`, `MatMulT`, `MatMulTA`)
-exist precisely so these three products can be written without allocating a
-transposed copy.
+exist precisely so these three products can be written without the caller
+transposing anything. All three compute the output in 4x4 register tiles
+(16 independent accumulators) and run in parallel; `MatMulTA` additionally
+blocks over `k` so each slab of its operands is reused from cache.
 
 ### LayerNorm (`model/layernorm.go`)
 

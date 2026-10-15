@@ -46,7 +46,14 @@ func (a *CausalSelfAttention) Forward(x *tensor.Mat, batch, seq int) *tensor.Mat
 	h, hs := a.Heads, a.headDim
 	a.b, a.t = batch, seq
 	a.qkv = a.QKV.Forward(x)
-	a.att = make([]float64, batch*h*seq*seq)
+	// Reuse the attention-weight buffer across calls instead of allocating
+	// B*H*T*T floats per layer per step; it must start zeroed because the
+	// entries past the diagonal (s > t) are the causal mask.
+	if n := batch * h * seq * seq; len(a.att) == n {
+		clear(a.att)
+	} else {
+		a.att = make([]float64, n)
+	}
 	y := tensor.New(batch*seq, d)
 	scale := 1 / math.Sqrt(float64(hs))
 

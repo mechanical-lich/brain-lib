@@ -9,7 +9,7 @@ retargeted from prose to any discrete token stream.
 
 | package      | purpose |
 |--------------|---------|
-| `tensor/`    | row-major float64 `Mat` and the few ops a transformer needs (`MatMul`, `MatMulT`, `MatMulTA`, broadcast add, ...). Parallel over rows. |
+| `tensor/`    | row-major float64 `Mat` and the few ops a transformer needs (`MatMul`, `MatMulT`, `MatMulTA`, broadcast add, ...). The matmuls are cache-tiled and parallel. |
 | `tokenizer/` | `Tokenizer` interface with `Char` (one token per rune) and `Symbol` (one token per whitespace-separated symbol). JSON `Marshal`/`Unmarshal`. BPE slots in here later. |
 | `model/`     | `Config`, `Param`, `Linear`, `LayerNorm`, `CausalSelfAttention`, `MLP`, `Block`, `GPT` (tied embedding / output head), and `Generate`. Every layer has `Forward` and `Backward`. |
 | `train/`     | `CrossEntropy`, `AdamW` + `ClipGradNorm` + `Cosine` LR schedule, gob checkpoints (`Snapshot`/`Save`/`Load`), and `Run`, a training loop over any `Batcher`. |
