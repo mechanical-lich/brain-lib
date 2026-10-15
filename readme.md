@@ -36,12 +36,13 @@ See each `cmd/*` folder for command-specific flags and usage.
 ## Repository Layout
 
 - `cmd/` — small command-line tools and example programs (e.g., `brain-trainer`, `sandbox`, `validator`).
-- `docs/` — design notes and guides (e.g., `NEUROEMITTERS.md`, `PLASTICITY_GUIDE.md`).
+- `docs/` — design notes and guides (e.g., `NEUROEMITTERS.md`, `PLASTICITY_GUIDE.md`, `GPT_GUIDE.md`).
 - `local_data/` — example JSON brains and training datasets used by tests and examples.
 - `pkg/` — core packages:
 	- `ann/` — artificial neural network implementations and training helpers
 	- `brain/` — higher-level brain model abstractions, integration tests, and utilities
 	- `pnn/` — probabilistic neural network helpers
+	- `gpt/` — minimal from-scratch GPT (pure-Go tensors, manual backprop); see `pkg/gpt/readme.md`
 
 ## Usage
 
