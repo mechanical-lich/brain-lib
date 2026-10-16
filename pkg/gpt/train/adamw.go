@@ -72,6 +72,15 @@ func (o *AdamW) Step() {
 // StepCount returns the number of updates applied so far.
 func (o *AdamW) StepCount() int { return o.step }
 
+// SetStepCount overrides the update counter, for restoring an optimizer whose
+// updates were applied elsewhere (for example on a GPU).
+func (o *AdamW) SetStepCount(n int) { o.step = n }
+
+// Moments returns the first and second moment estimates of parameter i, in
+// the order of the params the optimizer was created with. The matrices are
+// the optimizer's own; callers may read or overwrite them in place.
+func (o *AdamW) Moments(i int) (m, v *tensor.Mat) { return o.m[i], o.v[i] }
+
 // ClipGradNorm rescales all gradients so their global L2 norm is at most
 // maxNorm. It returns the norm before clipping.
 func ClipGradNorm(params []*model.Param, maxNorm float64) float64 {
