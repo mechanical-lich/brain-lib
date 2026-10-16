@@ -14,6 +14,7 @@ retargeted from prose to any discrete token stream.
 | `model/`     | `Config`, `Param`, `Linear`, `LayerNorm`, `CausalSelfAttention`, `MLP`, `Block`, `GPT` (tied embedding / output head), and `Generate`. Every layer has `Forward` and `Backward`. |
 | `train/`     | `CrossEntropy`, `AdamW` + `ClipGradNorm` + `Cosine` LR schedule, gob checkpoints (`Snapshot`/`Save`/`Load`), and `Run`, a training loop over any `Batcher`. |
 | `data/`      | `Dataset` (random windows from a token stream, satisfies `train.Batcher`), `Split`, `ReadText`, `Clean` (corpus normalization), and the Project Gutenberg fetcher. |
+| `gpu/`       | float32 GPU tensors and the WGSL kernels a training step needs (matmuls, softmax, LayerNorm, GELU, embeddings, cross-entropy, dropout, AdamW) through pure-Go WebGPU, each tested against this package's CPU code. Additive and not yet wired into training; see `gpu/readme.md`. |
 
 Commands live in `cmd/gpt-fetch`, `cmd/gpt-train`, `cmd/gpt-generate`.
 
