@@ -37,6 +37,14 @@ func (g *GPT) Generate(prompt []int, maxNew int, opts GenerateOptions, rng *rand
 
 // sample picks a token id from a logit vector according to opts.
 func sample(logits []float64, opts GenerateOptions, rng *rand.Rand) int {
+	return Sample(logits, opts, rng)
+}
+
+// Sample picks a token id from one row of next-token logits according to
+// opts: greedy argmax when Temperature <= 0, otherwise a draw from the
+// temperature-scaled softmax, restricted to the TopK largest when TopK > 0.
+// It is exported so other backends (pkg/gpt/gpumodel) sample identically.
+func Sample(logits []float64, opts GenerateOptions, rng *rand.Rand) int {
 	if opts.Temperature <= 0 {
 		best := 0
 		for i, v := range logits {

@@ -389,3 +389,37 @@ func BenchmarkTrainStep(b *testing.B) {
 	}
 	b.ReportMetric(float64(b.Elapsed().Milliseconds())/float64(b.N), "ms/step")
 }
+
+func TestGenerateMatchesCPUGreedy(t *testing.T) {
+	d := dev(t)
+	g, m := newPair(t, d, midCfg, 31)
+	defer m.Close()
+	m.SetTraining(true) // Generate must switch dropout off and restore the mode
+	for _, prompt := range [][]int{{1}, {5, 9, 2}, {7, 7, 7, 7, 7, 7}} {
+		want := g.Generate(prompt, 12, model.GenerateOptions{}, nil)
+		got, err := m.Generate(prompt, 12, model.GenerateOptions{}, nil)
+		require.NoError(t, err)
+		assert.Equal(t, want, got, "greedy continuation of %v", prompt)
+	}
+	assert.True(t, m.training, "training mode restored")
+	// the window exceeds ContextLen and gets truncated like the CPU
+	long := make([]int, midCfg.ContextLen+5)
+	for i := range long {
+		long[i] = i % midCfg.VocabSize
+	}
+	want := g.Generate(long, 3, model.GenerateOptions{}, nil)
+	got, err := m.Generate(long, 3, model.GenerateOptions{}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	// sampling returns ids in range of the right length
+	rng := rand.New(rand.NewSource(3))
+	got, err = m.Generate([]int{1, 2}, 10, model.GenerateOptions{Temperature: 1, TopK: 5}, rng)
+	require.NoError(t, err)
+	require.Len(t, got, 12)
+	for _, id := range got {
+		assert.GreaterOrEqual(t, id, 0)
+		assert.Less(t, id, midCfg.VocabSize)
+	}
+	_, err = m.Generate(nil, 1, model.GenerateOptions{}, rng)
+	assert.Error(t, err)
+}

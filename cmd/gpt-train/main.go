@@ -148,6 +148,13 @@ func main() {
 		CheckpointEvery: *ckptEvery, CheckpointPath: *out, Tokenizer: tokBytes,
 	}
 	stepper := train.NewCPUStepper(g, opt, *clip)
+	// generate produces the periodic sample: on the CPU model (refreshed
+	// by Sync before each eval), or on the GPU when that is the backend,
+	// where a 200-token sample takes well under a second instead of the
+	// tens of seconds a CPU forward per token costs at this model size.
+	generate := func(prompt []int, n int, opts model.GenerateOptions) ([]int, error) {
+		return g.Generate(prompt, n, opts, rng), nil
+	}
 	if *backend == "gpu" {
 		dev, err := gpu.Open()
 		if err != nil {
@@ -168,6 +175,9 @@ func main() {
 			fatal(log, "-backend gpu: load model", err)
 		}
 		stepper = gs
+		generate = func(prompt []int, n int, opts model.GenerateOptions) ([]int, error) {
+			return gs.Generate(prompt, n, opts, rng)
+		}
 		log.Info("backend", "backend", "gpu", "adapter", dev.Name(), "params", g.NumParams())
 	} else {
 		log.Info("backend", "backend", "cpu", "params", g.NumParams())
@@ -188,8 +198,13 @@ func main() {
 			if len(prompt) == 0 || prompt[0] == tokenizer.UnknownToken {
 				prompt = []int{1}
 			}
-			ids := g.Generate(prompt, *sampleLen, model.GenerateOptions{Temperature: 0.8, TopK: 40}, rng)
-			fmt.Fprintf(os.Stderr, "---- sample @ step %d ----\n%s\n----\n", m.Step, strings.TrimSpace(tok.Decode(ids)))
+			t0 := time.Now()
+			ids, err := generate(prompt, *sampleLen, model.GenerateOptions{Temperature: 0.8, TopK: 40})
+			if err != nil {
+				log.Error("sample", "err", err)
+				return
+			}
+			fmt.Fprintf(os.Stderr, "---- sample @ step %d (%d tokens in %v) ----\n%s\n----\n", m.Step, *sampleLen, time.Since(t0).Round(time.Millisecond), strings.TrimSpace(tok.Decode(ids)))
 		}
 	})
 	if err != nil {

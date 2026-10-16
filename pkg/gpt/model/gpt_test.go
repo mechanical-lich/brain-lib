@@ -154,10 +154,16 @@ func TestSampleTopKAndGreedy(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
 	logits := []float64{0, 5, 1, 4}
 	assert.Equal(t, 1, sample(logits, GenerateOptions{}, rng))
+	assert.Equal(t, 1, Sample(logits, GenerateOptions{Temperature: 0}, rng), "exported Sample is greedy at temperature 0")
 	for i := 0; i < 50; i++ {
-		id := sample(logits, GenerateOptions{Temperature: 1, TopK: 2}, rng)
+		id := Sample(logits, GenerateOptions{Temperature: 1, TopK: 2}, rng)
 		assert.Contains(t, []int{1, 3}, id)
 	}
+	seen := map[int]bool{}
+	for i := 0; i < 200; i++ {
+		seen[Sample(logits, GenerateOptions{Temperature: 1}, rng)] = true
+	}
+	assert.True(t, seen[1] && seen[3], "temperature 1 without top-k draws the likely ids")
 }
 
 func TestGeluGrad(t *testing.T) {

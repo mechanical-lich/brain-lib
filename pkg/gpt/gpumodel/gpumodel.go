@@ -213,6 +213,8 @@ type activations struct {
 	logits  *gpu.Tensor // [N, V]; becomes dLogits in TrainStep
 	losses  *gpu.Tensor // [N, 1]
 	lossT   *gpu.Tensor // [1, 1]: mean loss
+	lastRow *gpu.Index  // one row of logits, for Generate
+	lastLog *gpu.Tensor // [1, V]: that row
 	normT   *gpu.Tensor // [1, 1]: squared gradient norm
 
 	// backward scratch, [N, D] unless noted
@@ -242,7 +244,8 @@ func (a *activations) release() {
 	a.ids.Release()
 	a.pos.Release()
 	a.targets.Release()
-	ts := []*gpu.Tensor{a.x0, a.embMask, a.xhatF, a.rstdF, a.hF, a.logits, a.losses, a.lossT, a.normT,
+	a.lastRow.Release()
+	ts := []*gpu.Tensor{a.x0, a.embMask, a.xhatF, a.rstdF, a.hF, a.logits, a.losses, a.lossT, a.normT, a.lastLog,
 		a.dA, a.dB, a.dC, a.dMasked, a.dLN, a.dAttOut, a.dqkv, a.dAct, a.dScores}
 	for _, l := range a.layers {
 		ts = append(ts, l.xhat1, l.rstd1, l.h1, l.qkv, l.scores, l.attOut, l.h, l.attnMask,
@@ -274,7 +277,8 @@ func (m *Model) ensure(batch, seq int) *activations {
 		ids:     dev.NewIndex(zeros, v),
 		pos:     dev.NewIndex(pos, cfg.ContextLen),
 		targets: dev.NewIndex(zeros, v),
-		x0:      dev.NewTensor(n, d), embMask: dev.NewTensor(n, d),
+		lastRow: dev.NewIndex([]int{0}, n), lastLog: dev.NewTensor(1, v),
+		x0: dev.NewTensor(n, d), embMask: dev.NewTensor(n, d),
 		xhatF: dev.NewTensor(n, d), rstdF: dev.NewTensor(n, 1), hF: dev.NewTensor(n, d),
 		logits: dev.NewTensor(n, v), losses: dev.NewTensor(n, 1), lossT: dev.NewTensor(1, 1), normT: dev.NewTensor(1, 1),
 		dA: dev.NewTensor(n, d), dB: dev.NewTensor(n, d), dC: dev.NewTensor(n, d),
