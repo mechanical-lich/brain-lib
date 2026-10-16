@@ -19,11 +19,14 @@ Clone the repo (if not already in your workspace) and run the tests / build exam
 ```bash
 cd brain-lib
 go test ./...
-# build example CLI tools
-go build ./cmd/brain-trainer
-go build ./cmd/sandbox
-go build ./cmd/validator
+# build every CLI tool in cmd/ for this machine -> bin/
+make build
 ```
+
+Cross-compile with `make build-linux` (amd64 + arm64), `make build-mac`,
+`make build-windows`, or `make build-all`; binaries land in
+`bin/<os>-<arch>/`. `TOOLS=gpt-train` limits which commands are built and
+`make build-platform PLATFORM=linux/386` targets any other GOOS/GOARCH pair.
 
 Run the brain trainer example (binary `cmd/brain-trainer`):
 
