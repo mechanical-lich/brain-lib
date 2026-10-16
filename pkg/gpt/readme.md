@@ -25,6 +25,7 @@ Commands live in `cmd/gpt-fetch`, `cmd/gpt-train`, `cmd/gpt-generate`.
 go run ./cmd/gpt-fetch                                  # -> local_data/gutenberg/*.txt
 go run ./cmd/gpt-train -steps 2000 -layers 4 -dim 128   # -> local_data/gpt/model.ckpt
 go run ./cmd/gpt-train -backend gpu -steps 2000 ...      # same run on the GPU (pure-Go WebGPU)
+go run ./cmd/gpt-generate -backend gpu -prompt "The old house" -n 400   # sample on the GPU
 go run ./cmd/gpt-generate -prompt "The old house" -n 400
 ```
 
