@@ -127,10 +127,11 @@ out a hidden matmul problem and pointed at three things, done in order:
 | 128-row matmul tiles for M >= 1024 | 259 |
 | split-K for the weight gradients | 255 |
 
-The elementwise fusions bought little here because the M5 has 200 GB/s;
-they matter on the Radeon 780M's 67 GB/s, where the real run reported 535
-ms per step before this pass. Not yet re-measured there; the test binary
-build below is how. The phase-one kernels ran about 15% faster on the AMD
+The elementwise fusions bought little here because the M5 has 200 GB/s.
+They matter on the AMD Radeon 780M server (Vulkan, 67 GB/s), where a real
+`gpt-train -backend gpu` run at this shape reported 535 ms per step before
+this pass and 232 ms after it, 2.3x, against 7.9 s per step on that
+machine's CPU. The phase-one kernels ran about 15% faster on the AMD
 Radeon 780M server than here, and that server's CPU step is 7.9 s, so the
 GPU step there should land near 30x. Not yet measured there; the cross
 compiled test binary is the way to do it:
