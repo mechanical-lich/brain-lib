@@ -10,6 +10,10 @@
 // -bpe-vocab ids), or "symbol" (one token per whitespace-separated
 // word/symbol, which is the mode to use for a sensor/action vocabulary). The
 // tokenizer is built on a fresh run only; -resume restores the checkpoint's.
+//
+// -backend gpu runs every training step on the machine's GPU through the
+// pure-Go WebGPU backend (pkg/gpt/gpu, pkg/gpt/gpumodel). Checkpoints are
+// the same files either way, so a run can switch backends at any -resume.
 package main
 
 import (
@@ -24,6 +28,8 @@ import (
 	"time"
 
 	"github.com/mechanical-lich/brain-lib/pkg/gpt/data"
+	"github.com/mechanical-lich/brain-lib/pkg/gpt/gpu"
+	"github.com/mechanical-lich/brain-lib/pkg/gpt/gpumodel"
 	"github.com/mechanical-lich/brain-lib/pkg/gpt/model"
 	"github.com/mechanical-lich/brain-lib/pkg/gpt/tokenizer"
 	"github.com/mechanical-lich/brain-lib/pkg/gpt/train"
@@ -56,7 +62,12 @@ func main() {
 	ckptEvery := flag.Int("ckpt-every", 100, "Checkpoint every N steps (0 disables)")
 	sampleLen := flag.Int("sample", 200, "Tokens to sample after each validation (0 disables)")
 	seed := flag.Int64("seed", 1, "RNG seed")
+	backend := flag.String("backend", "cpu", "Where training steps run: cpu (float64) or gpu (float32, via pure-Go WebGPU)")
 	flag.Parse()
+	if *backend != "cpu" && *backend != "gpu" {
+		fmt.Fprintf(os.Stderr, "unknown -backend %q (want cpu or gpu)\n", *backend)
+		os.Exit(2)
+	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	rng := rand.New(rand.NewSource(*seed))
@@ -136,11 +147,38 @@ func main() {
 		EvalEvery: *evalEvery, EvalBatches: *evalBatches,
 		CheckpointEvery: *ckptEvery, CheckpointPath: *out, Tokenizer: tokBytes,
 	}
+	stepper := train.NewCPUStepper(g, opt, *clip)
+	if *backend == "gpu" {
+		dev, err := gpu.Open()
+		if err != nil {
+			if errors.Is(err, gpu.ErrNoAdapter) {
+				fatal(log, "-backend gpu: no hardware GPU adapter (Linux needs the Vulkan loader and a driver such as Mesa RADV); use -backend cpu", err)
+			}
+			fatal(log, "-backend gpu: open device", err)
+		}
+		defer dev.Close()
+		gm, err := gpumodel.New(dev, g.Config)
+		if err != nil {
+			fatal(log, "-backend gpu: allocate model", err)
+		}
+		defer gm.Close()
+		gm.SetSeed(uint32(*seed))
+		gs, err := gpumodel.NewStepper(gm, g, opt, *clip)
+		if err != nil {
+			fatal(log, "-backend gpu: load model", err)
+		}
+		stepper = gs
+		log.Info("backend", "backend", "gpu", "adapter", dev.Name(), "params", g.NumParams())
+	} else {
+		log.Info("backend", "backend", "cpu", "params", g.NumParams())
+	}
+
 	start := time.Now()
-	err = train.Run(g, opt, trainSet, valSet, opts, rng, func(m train.Metrics) {
+	err = train.RunStepper(stepper, g, opt, trainSet, valSet, opts, rng, func(m train.Metrics) {
 		if math.IsNaN(m.ValLoss) {
 			if m.Step%10 == 0 {
-				log.Info("step", "step", m.Step, "loss", round(m.Loss), "lr", m.LR, "gnorm", round(m.GradNorm), "elapsed", time.Since(start).Round(time.Second))
+				perStep := time.Since(start) / time.Duration(m.Step-started)
+				log.Info("step", "step", m.Step, "loss", round(m.Loss), "lr", m.LR, "gnorm", round(m.GradNorm), "ms_per_step", perStep.Milliseconds(), "elapsed", time.Since(start).Round(time.Second))
 			}
 			return
 		}

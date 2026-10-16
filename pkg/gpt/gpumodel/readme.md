@@ -119,24 +119,14 @@ CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -c -o bin/linux-amd64/gpumodel.tes
 ./gpumodel.test -test.run XXX -test.bench TrainStep -test.benchtime 5x
 ```
 
-## Phase three
+## In the trainer
 
-Wiring this into `cmd/gpt-train` behind a `-backend gpu` flag:
-
-1. `gpu.Open()`; on `gpu.ErrNoAdapter` fall back to the CPU path, or fail
-   if the flag was explicit.
-2. Build the `model.GPT` and `train.AdamW` exactly as now (fresh or from a
-   checkpoint), then `gpumodel.New` + `LoadFrom` + `LoadOptimizer`.
-3. Replace the loop body in `train.Run` with `TrainStep(x, y, cfg, clip,
-   step)`, driving the learning rate from the schedule by setting
-   `cfg.LR` per step; `train.Run` could take a small interface with
-   `TrainStep` and `Eval` so the CPU and GPU paths share the loop,
-   checkpoint cadence and logging.
-4. Validation through `Eval`; checkpoints through `StoreTo` then
-   `train.Snapshot`/`Save` as today, so a run can move between CPU and GPU
-   at any checkpoint.
-5. Sampling: `Forward` on the window and the last row's logits through the
-   existing `model.GenerateOptions` sampler, or `StoreTo` into the CPU model
-   and use `GPT.Generate` as now. Each generated token re-runs a full forward
-   and downloads `[T, V]` logits, about 2 MB, so a KV cache is not needed
-   for samples during training but would be for interactive use.
+`Stepper` (stepper.go) adapts a `Model` to `train.Stepper`, so
+`train.RunStepper` drives the GPU with the same schedule, validation,
+checkpoint cadence and logging as the CPU. `Sync` downloads weights and
+moments into the CPU model and optimizer before each validation and
+checkpoint, so `train.Snapshot` writes the same float64 gob file as a CPU
+run and `-resume` works in either direction. `cmd/gpt-train -backend gpu`
+is the switch; it fails with a message when there is no hardware adapter.
+Samples during training come from the synced CPU model through
+`model.Generate`, which is fine at the eval cadence.

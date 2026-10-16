@@ -279,6 +279,28 @@ every `CheckpointEvery` steps and at the end, and calls your `onStep`
 callback with a `Metrics` struct. `Run` takes a `Batcher` interface rather
 than a `data.Dataset`, which is the seam for non-text training (see below).
 
+### Backends (`train/stepper.go`, `gpumodel/`)
+
+The loop body lives behind a small `Stepper` interface: `TrainStep(x, y,
+lr, step)`, `Eval(x, y)` and `Sync(step)`. `train.Run` wraps the CPU
+implementation (the float64 code described above) and calls
+`train.RunStepper`, which owns the schedule, validation, checkpoint cadence
+and the `onStep` callback for any backend. `Sync` runs before each
+validation and checkpoint so the CPU model and optimizer, which checkpoints
+and sampling are always built from, reflect the backend's state. On the
+CPU it is a no-op.
+
+`gpumodel.Stepper` is the GPU backend: `gpt-train -backend gpu` uploads the
+model and optimizer to the GPU through the pure-Go WebGPU layer in
+`pkg/gpt/gpu` and runs every step there in float32 with one submission per
+step. Flags, tokenizers and checkpoints are identical in both modes, so a
+run can be resumed on either backend from any checkpoint. What differs is
+the arithmetic: float32 on the GPU, so losses agree with a CPU run only to
+about the third decimal place, and the dropout masks are drawn from a
+different generator. On an Apple M5 the BPE Lovecraft shape runs at about
+0.3 s per step on the GPU against 2.5 s on the CPU. Without a usable GPU
+the flag fails with a message rather than silently falling back.
+
 ### Checkpoints (`train/checkpoint.go`)
 
 A `Checkpoint` holds the `model.Config`, the step count, every parameter by
