@@ -42,6 +42,6 @@ func TestMarshalUnmarshal(t *testing.T) {
 		sample := "The a b"
 		assert.Equal(t, orig.Encode(sample), back.Encode(sample))
 	}
-	_, err := Unmarshal([]byte(`{"kind":"bpe","state":{}}`))
+	_, err := Unmarshal([]byte(`{"kind":"wordpiece","state":{}}`))
 	assert.Error(t, err)
 }

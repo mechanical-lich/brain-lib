@@ -3,13 +3,15 @@
 // tokenizer is enough to retarget the same architecture from prose to, say, a
 // tiny vocabulary of sensor readings and robot actions.
 //
-// Two implementations ship today:
+// Three implementations ship today:
 //
 //   - Char: one token per rune, built from a sample corpus.
 //   - Symbol: one token per whitespace-separated symbol from a fixed list,
 //     intended for small discrete vocabularies (sensor/action tokens).
+//   - BPE: GPT-2 style byte-level byte-pair encoding learned from a corpus,
+//     so common words and word pieces become single tokens.
 //
-// A BPE tokenizer can be added later by implementing Tokenizer and registering
+// Another tokenizer can be added by implementing Tokenizer and registering
 // its kind in Marshal/Unmarshal.
 package tokenizer
 
@@ -34,6 +36,7 @@ type Tokenizer interface {
 const (
 	KindChar   = "char"
 	KindSymbol = "symbol"
+	KindBPE    = "bpe"
 )
 
 type envelope struct {
@@ -48,6 +51,8 @@ func Marshal(t Tokenizer) ([]byte, error) {
 	case *Char:
 		state = v.state()
 	case *Symbol:
+		state = v.state()
+	case *BPE:
 		state = v.state()
 	default:
 		return nil, fmt.Errorf("tokenizer: cannot marshal kind %q", t.Kind())
@@ -70,6 +75,8 @@ func Unmarshal(data []byte) (Tokenizer, error) {
 		return charFromState(env.State)
 	case KindSymbol:
 		return symbolFromState(env.State)
+	case KindBPE:
+		return bpeFromState(env.State)
 	default:
 		return nil, fmt.Errorf("tokenizer: unknown kind %q", env.Kind)
 	}

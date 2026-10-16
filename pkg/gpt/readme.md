@@ -10,7 +10,7 @@ retargeted from prose to any discrete token stream.
 | package      | purpose |
 |--------------|---------|
 | `tensor/`    | row-major float64 `Mat` and the few ops a transformer needs (`MatMul`, `MatMulT`, `MatMulTA`, broadcast add, ...). The matmuls are cache-tiled and parallel. |
-| `tokenizer/` | `Tokenizer` interface with `Char` (one token per rune) and `Symbol` (one token per whitespace-separated symbol). JSON `Marshal`/`Unmarshal`. BPE slots in here later. |
+| `tokenizer/` | `Tokenizer` interface with `Char` (one token per rune), `Symbol` (one token per whitespace-separated symbol) and `BPE` (GPT-2 style byte-level byte-pair encoding learned from the corpus; `gpt-train -tokenizer bpe -bpe-vocab 2000`). JSON `Marshal`/`Unmarshal`. Losses are per token, so a BPE run's loss is not comparable with a character-level run's. |
 | `model/`     | `Config`, `Param`, `Linear`, `LayerNorm`, `CausalSelfAttention`, `MLP`, `Block`, `GPT` (tied embedding / output head), and `Generate`. Every layer has `Forward` and `Backward`. |
 | `train/`     | `CrossEntropy`, `AdamW` + `ClipGradNorm` + `Cosine` LR schedule, gob checkpoints (`Snapshot`/`Save`/`Load`), and `Run`, a training loop over any `Batcher`. |
 | `data/`      | `Dataset` (random windows from a token stream, satisfies `train.Batcher`), `Split`, `ReadText`, `Clean` (corpus normalization), and the Project Gutenberg fetcher. |

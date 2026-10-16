@@ -6,8 +6,10 @@
 //	go run ./cmd/gpt-train -data my_corpus -clean   # normalize user-supplied text first
 //
 // The -tokenizer flag picks how text becomes tokens: "char" (one token per
-// rune) or "symbol" (one token per whitespace-separated word/symbol, which is
-// the mode to use for a sensor/action vocabulary).
+// rune), "bpe" (GPT-2 style byte-pair encoding learned from the corpus, with
+// -bpe-vocab ids), or "symbol" (one token per whitespace-separated
+// word/symbol, which is the mode to use for a sensor/action vocabulary). The
+// tokenizer is built on a fresh run only; -resume restores the checkpoint's.
 package main
 
 import (
@@ -31,7 +33,8 @@ func main() {
 	dataPath := flag.String("data", "local_data/gutenberg", "Corpus: a .txt file or a directory of .txt files")
 	out := flag.String("out", "local_data/gpt/model.ckpt", "Checkpoint path")
 	resume := flag.Bool("resume", false, "Resume from -out if it exists (model shape and -dropout flags are ignored)")
-	tokKind := flag.String("tokenizer", tokenizer.KindChar, "Tokenizer kind: char or symbol")
+	tokKind := flag.String("tokenizer", tokenizer.KindChar, "Tokenizer kind for a new model: char, bpe or symbol (ignored on resume)")
+	bpeVocab := flag.Int("bpe-vocab", 2000, "Vocabulary size to learn with -tokenizer bpe: 256 byte ids plus merges (ignored on resume)")
 	clean := flag.Bool("clean", false, "Run data.Clean with default options on the corpus before tokenizing (use the same setting when resuming)")
 
 	layers := flag.Int("layers", 4, "Transformer blocks")
@@ -96,9 +99,9 @@ func main() {
 		// fixed one the checkpoint loader builds the model with.
 		g.SetRNG(rng)
 		started = ck.Step
-		log.Info("resumed", "path", *out, "step", started, "config", fmt.Sprintf("%+v", g.Config))
+		log.Info("resumed", "path", *out, "step", started, "tokenizer", tok.Kind(), "config", fmt.Sprintf("%+v", g.Config))
 	} else {
-		tok = newTokenizer(*tokKind, text)
+		tok = newTokenizer(log, *tokKind, text, *bpeVocab)
 		cfg := model.Config{VocabSize: tok.VocabSize(), ContextLen: *ctxLen, NumLayers: *layers, NumHeads: *heads, EmbedDim: *dim, Dropout: *dropout}
 		if err := cfg.Validate(); err != nil {
 			fatal(log, "config", err)
@@ -115,12 +118,14 @@ func main() {
 	tokens := tok.Encode(text)
 	trainSet, valSet := data.Split(tokens, *valFrac)
 	unknown := 0
-	for _, id := range tokens {
-		if id == tokenizer.UnknownToken {
-			unknown++
+	if tok.Kind() != tokenizer.KindBPE { // BPE has no unknown id; 0 is the NUL byte
+		for _, id := range tokens {
+			if id == tokenizer.UnknownToken {
+				unknown++
+			}
 		}
 	}
-	log.Info("corpus", "chars", len(text), "tokens", len(tokens), "vocab", tok.VocabSize(), "unknown", unknown)
+	log.Info("corpus", "chars", len(text), "tokens", len(tokens), "bytes_per_token", round(float64(len(text))/float64(max(len(tokens), 1))), "vocab", tok.VocabSize(), "unknown", unknown)
 	if unknown > 0 {
 		log.Warn("corpus has tokens outside the vocabulary; was -clean set the same way as the first run?", "unknown", unknown)
 	}
@@ -166,14 +171,19 @@ func loadIfResuming(resume bool, path string) (*train.Checkpoint, error) {
 	return ck, err
 }
 
-func newTokenizer(kind, text string) tokenizer.Tokenizer {
+func newTokenizer(log *slog.Logger, kind, text string, bpeVocab int) tokenizer.Tokenizer {
 	switch kind {
 	case tokenizer.KindChar:
 		return tokenizer.NewChar(text)
+	case tokenizer.KindBPE:
+		start := time.Now()
+		tok := tokenizer.NewBPE(text, bpeVocab)
+		log.Info("learned bpe", "elapsed", time.Since(start).Round(time.Millisecond), "vocab", tok.VocabSize(), "requested", bpeVocab)
+		return tok
 	case tokenizer.KindSymbol:
 		return tokenizer.NewSymbol(strings.Fields(text))
 	default:
-		fmt.Fprintf(os.Stderr, "unknown tokenizer %q (want char or symbol)\n", kind)
+		fmt.Fprintf(os.Stderr, "unknown tokenizer %q (want char, bpe or symbol)\n", kind)
 		os.Exit(2)
 		return nil
 	}

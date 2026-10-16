@@ -350,8 +350,44 @@ restore the right one.
   ids are stable. Id 0 is reserved for unknown runes.
 - `Symbol`: one id per whitespace-separated symbol from a fixed list. Id 0 is
   unknown. This is the tokenizer for discrete action/sensor vocabularies.
+- `BPE`: byte-level byte-pair encoding as in GPT-2 (`gpt-train -tokenizer bpe
+  -bpe-vocab 2000`). Ids 0-255 are the byte values, so any text encodes and
+  there is no unknown id (0 is the NUL byte). `NewBPE(corpus, vocabSize)`
+  learns `vocabSize - 256` merges, each adding one id for the concatenation of
+  two existing tokens. The checkpoint stores the ordered merge list, and
+  `-resume` restores it rather than relearning.
 
-Adding BPE later means implementing the interface and adding a case to the
+How `BPE` learns and encodes:
+
+1. **Pre-tokenize.** Text is split into words with GPT-2's rule: an optional
+   leading space plus a run of letters, a run of digits, or a run of other
+   non-space characters; contractions (`'s`, `'t`, `'re`, `'ve`, `'m`, `'ll`,
+   `'d`) split off; a newline before text is its own word. So `" the"`,
+   `" horror"`, `","` and `"\n"` are words, and a merge never crosses a word
+   boundary.
+2. **Learn (Sennrich).** Count each distinct word once with its frequency,
+   then repeat: find the most frequent adjacent pair across the dictionary
+   (weighted by word count; ties go to the smaller ids), record it as the next
+   merge, and rewrite only the words that contain it, updating pair counts
+   incrementally. On the 2.9 MB Lovecraft corpus 1744 merges take about 0.3 s.
+3. **Encode.** For each word (cached), start from its bytes and repeatedly
+   apply the lowest-ranked merge present until none applies. `Decode`
+   concatenates the tokens' bytes; a generated sample can stop partway
+   through a multibyte rune.
+
+`Vocab()` returns every id's token as a string for inspection. Early merges
+are pieces like `" t"`, `"he"`, `" the"`; by id 2000 they are whole words and
+stems such as `" slow"` and `" remem"`. With 2000 ids, Lovecraft averages
+about 3.2 bytes per token, so a 256-token context covers roughly 830
+characters instead of 256.
+
+**Losses are per token.** Cross-entropy is reported in nats per token, so a
+BPE run's loss is not comparable with a character-level run's. To compare,
+convert both to nats per character: multiply a BPE loss by tokens/characters
+from the `corpus` log line (`1 / bytes_per_token` for mostly-ASCII text). A
+fresh BPE model starts near `ln(VocabSize)`, about 7.6 for 2000 ids.
+
+Another tokenizer means implementing the interface and adding a case to the
 `switch` in `Marshal` and `Unmarshal`.
 
 ## Using the Model for Robot Decisions
@@ -447,7 +483,7 @@ that keeps climbing precedes a divergence by a few hundred steps.
 - **KV cache**: `Generate` could keep each block's keys and values and only
   compute the new position; `CausalSelfAttention` would need an incremental
   `Forward`.
-- **BPE tokenizer**: implement `Tokenizer`, register its kind.
+- **BPE tokenizer**: implemented (`tokenizer.BPE`, `cmd/gpt-train -tokenizer bpe`).
 - **Ignore index in the loss**: let `CrossEntropy` skip targets of `-1` so
   only chosen positions (for example actions) contribute.
 - **float32 or SIMD**: `tensor` is the only place that would change.
