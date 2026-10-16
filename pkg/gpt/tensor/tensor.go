@@ -55,6 +55,14 @@ func (m *Mat) Set(i, j int, v float64) { m.Data[i*m.Cols+j] = v }
 // Row returns row i as a slice view (not a copy).
 func (m *Mat) Row(i int) []float64 { return m.Data[i*m.Cols : (i+1)*m.Cols] }
 
+// RowRange returns rows [i, j) as a matrix view sharing m's storage.
+func (m *Mat) RowRange(i, j int) *Mat {
+	if i < 0 || j < i || j > m.Rows {
+		panic(fmt.Sprintf("tensor: RowRange [%d, %d) of %s", i, j, m.Shape()))
+	}
+	return &Mat{Rows: j - i, Cols: m.Cols, Data: m.Data[i*m.Cols : j*m.Cols : j*m.Cols]}
+}
+
 // Clone returns a deep copy.
 func (m *Mat) Clone() *Mat {
 	c := New(m.Rows, m.Cols)

@@ -55,6 +55,44 @@ func TestMatMulVariantsMatchNaive(t *testing.T) {
 	}
 }
 
+func TestIntoVariantsMatchNaive(t *testing.T) {
+	rng := rand.New(rand.NewSource(2))
+	for _, sh := range [][3]int{{3, 7, 5}, {9, 3, 6}, {66, 2*taKBlock + 3, 13}} {
+		n, k, m := sh[0], sh[1], sh[2]
+		a := Randn(n, k, 1, rng)
+		b := Randn(k, m, 1, rng)
+		want := naiveMatMul(a, b).Data
+
+		bt := New(m, k)
+		TransposeInto(bt, b)
+		assert.Equal(t, transpose(b).Data, bt.Data)
+		out := New(n, m)
+		MatMulTInto(out, a, bt)
+		assert.InDeltaSlice(t, want, out.Data, 1e-12)
+
+		// MatMulTAInto accumulates: two half-k passes must sum to the product.
+		at := transpose(a) // [k,n]
+		acc := New(n, m)
+		h := k / 2
+		MatMulTAInto(acc, at.RowRange(0, h), b.RowRange(0, h))
+		MatMulTAInto(acc, at.RowRange(h, k), b.RowRange(h, k))
+		assert.InDeltaSlice(t, want, acc.Data, 1e-12)
+	}
+}
+
+func TestRowRangeIsView(t *testing.T) {
+	m := New(4, 3)
+	v := m.RowRange(1, 3)
+	assert.Equal(t, 2, v.Rows)
+	assert.Equal(t, 3, v.Cols)
+	v.Set(1, 2, 7)
+	assert.Equal(t, 7.0, m.At(2, 2))
+	assert.Panics(t, func() { m.RowRange(2, 5) })
+	assert.Panics(t, func() { TransposeInto(New(3, 3), m) })
+	assert.Panics(t, func() { MatMulTInto(New(4, 4), m, New(5, 2)) })
+	assert.Panics(t, func() { MatMulTAInto(New(3, 3), m, New(5, 3)) })
+}
+
 func TestParallelCoversRangeOnce(t *testing.T) {
 	for _, n := range []int{0, 1, 2, 7, 40, 1000} {
 		seen := make([]int32, n)

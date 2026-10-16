@@ -35,53 +35,80 @@ func MatMulT(a, b *Mat) *Mat {
 	return out
 }
 
+// MatMulTInto sets out = a @ b^T for a [n,k], b [m,k] and out [n,m], on the
+// calling goroutine only. It is for callers already running inside Parallel
+// with one small product per worker (attention does one per head), where
+// the parallel kernels' own goroutine fan-out would just add overhead.
+func MatMulTInto(out, a, b *Mat) {
+	if a.Cols != b.Cols || out.Rows != a.Rows || out.Cols != b.Rows {
+		panic(fmt.Sprintf("tensor: MatMulTInto %s = %s @ %s^T", out.Shape(), a.Shape(), b.Shape()))
+	}
+	rowDotRange(out, a, b, 0, a.Rows)
+}
+
 // MatMulTA returns a^T @ b for a [k,n] and b [k,m].
 func MatMulTA(a, b *Mat) *Mat {
 	if a.Rows != b.Rows {
 		panic(fmt.Sprintf("tensor: MatMulTA %s^T @ %s", a.Shape(), b.Shape()))
 	}
-	kk, n, m := a.Rows, a.Cols, b.Cols
-	out := New(n, m)
+	out := New(a.Cols, b.Cols)
 	// Both operands are read down their columns here, so a naive loop
 	// streams all of b once per output row. Instead each worker owns a block
 	// of output columns and walks k in slabs of taKBlock rows: within a slab
 	// the rows of a it needs and its columns of b stay in L1 while every 4x4
 	// output tile accumulates the slab in registers.
-	parallelTiles(m, tileCols, func(j0, j1 int) {
-		for k0 := 0; k0 < kk; k0 += taKBlock {
-			k1 := min(k0+taKBlock, kk)
-			i := 0
-			for ; i+tileRows <= n; i += tileRows {
-				j := j0
-				for ; j+tileCols <= j1; j += tileCols {
-					outer4x4(out, a, b, i, j, k0, k1)
-				}
-				for ; j < j1; j++ {
-					o0, o1, o2, o3 := out.Row(i), out.Row(i+1), out.Row(i+2), out.Row(i+3)
-					c0, c1, c2, c3 := o0[j], o1[j], o2[j], o3[j]
-					for k := k0; k < k1; k++ {
-						ar := a.Data[k*n+i : k*n+i+4 : k*n+i+4]
-						y := b.Data[k*m+j]
-						c0 += ar[0] * y
-						c1 += ar[1] * y
-						c2 += ar[2] * y
-						c3 += ar[3] * y
-					}
-					o0[j], o1[j], o2[j], o3[j] = c0, c1, c2, c3
-				}
+	parallelTiles(b.Cols, tileCols, func(j0, j1 int) {
+		outerCols(out, a, b, j0, j1)
+	})
+	return out
+}
+
+// MatMulTAInto adds a^T @ b for a [k,n], b [k,m] into out [n,m], on the
+// calling goroutine only (see MatMulTInto). Unlike MatMulTA it accumulates
+// into whatever out already holds.
+func MatMulTAInto(out, a, b *Mat) {
+	if a.Rows != b.Rows || out.Rows != a.Cols || out.Cols != b.Cols {
+		panic(fmt.Sprintf("tensor: MatMulTAInto %s += %s^T @ %s", out.Shape(), a.Shape(), b.Shape()))
+	}
+	outerCols(out, a, b, 0, b.Cols)
+}
+
+// outerCols accumulates columns [j0, j1) of a^T @ b into out, walking k in
+// slabs of taKBlock rows.
+func outerCols(out, a, b *Mat, j0, j1 int) {
+	kk, n, m := a.Rows, a.Cols, b.Cols
+	for k0 := 0; k0 < kk; k0 += taKBlock {
+		k1 := min(k0+taKBlock, kk)
+		i := 0
+		for ; i+tileRows <= n; i += tileRows {
+			j := j0
+			for ; j+tileCols <= j1; j += tileCols {
+				outer4x4(out, a, b, i, j, k0, k1)
 			}
-			for ; i < n; i++ {
-				oi := out.Row(i)[j0:j1]
+			for ; j < j1; j++ {
+				o0, o1, o2, o3 := out.Row(i), out.Row(i+1), out.Row(i+2), out.Row(i+3)
+				c0, c1, c2, c3 := o0[j], o1[j], o2[j], o3[j]
 				for k := k0; k < k1; k++ {
-					x := a.Data[k*n+i]
-					for j, y := range b.Row(k)[j0:j1] {
-						oi[j] += x * y
-					}
+					ar := a.Data[k*n+i : k*n+i+4 : k*n+i+4]
+					y := b.Data[k*m+j]
+					c0 += ar[0] * y
+					c1 += ar[1] * y
+					c2 += ar[2] * y
+					c3 += ar[3] * y
+				}
+				o0[j], o1[j], o2[j], o3[j] = c0, c1, c2, c3
+			}
+		}
+		for ; i < n; i++ {
+			oi := out.Row(i)[j0:j1]
+			for k := k0; k < k1; k++ {
+				x := a.Data[k*n+i]
+				for j, y := range b.Row(k)[j0:j1] {
+					oi[j] += x * y
 				}
 			}
 		}
-	})
-	return out
+	}
 }
 
 // taKBlock is the number of k rows MatMulTA accumulates per pass over its
@@ -137,29 +164,34 @@ func outer4x4(out, a, b *Mat, i, j, k0, k1 int) {
 
 // rowDotTiled sets out[i][j] = Dot(a.Row(i), b.Row(j)) for a [n,k], b [m,k].
 func rowDotTiled(out, a, b *Mat) {
-	n, m := a.Rows, b.Rows
-	parallelTiles(n, tileRows, func(lo, hi int) {
-		i := lo
-		for ; i+tileRows <= hi; i += tileRows {
-			a0, a1, a2, a3 := a.Row(i), a.Row(i+1), a.Row(i+2), a.Row(i+3)
-			o0, o1, o2, o3 := out.Row(i), out.Row(i+1), out.Row(i+2), out.Row(i+3)
-			j := 0
-			for ; j+tileCols <= m; j += tileCols {
-				dot4x4(a0, a1, a2, a3, b.Row(j), b.Row(j+1), b.Row(j+2), b.Row(j+3),
-					o0[j:j+4], o1[j:j+4], o2[j:j+4], o3[j:j+4])
-			}
-			for ; j < m; j++ {
-				bj := b.Row(j)
-				o0[j], o1[j], o2[j], o3[j] = Dot(a0, bj), Dot(a1, bj), Dot(a2, bj), Dot(a3, bj)
-			}
-		}
-		for ; i < hi; i++ {
-			ai, oi := a.Row(i), out.Row(i)
-			for j := 0; j < m; j++ {
-				oi[j] = Dot(ai, b.Row(j))
-			}
-		}
+	parallelTiles(a.Rows, tileRows, func(lo, hi int) {
+		rowDotRange(out, a, b, lo, hi)
 	})
+}
+
+// rowDotRange is rowDotTiled restricted to output rows [lo, hi).
+func rowDotRange(out, a, b *Mat, lo, hi int) {
+	m := b.Rows
+	i := lo
+	for ; i+tileRows <= hi; i += tileRows {
+		a0, a1, a2, a3 := a.Row(i), a.Row(i+1), a.Row(i+2), a.Row(i+3)
+		o0, o1, o2, o3 := out.Row(i), out.Row(i+1), out.Row(i+2), out.Row(i+3)
+		j := 0
+		for ; j+tileCols <= m; j += tileCols {
+			dot4x4(a0, a1, a2, a3, b.Row(j), b.Row(j+1), b.Row(j+2), b.Row(j+3),
+				o0[j:j+4], o1[j:j+4], o2[j:j+4], o3[j:j+4])
+		}
+		for ; j < m; j++ {
+			bj := b.Row(j)
+			o0[j], o1[j], o2[j], o3[j] = Dot(a0, bj), Dot(a1, bj), Dot(a2, bj), Dot(a3, bj)
+		}
+	}
+	for ; i < hi; i++ {
+		ai, oi := a.Row(i), out.Row(i)
+		for j := 0; j < m; j++ {
+			oi[j] = Dot(ai, b.Row(j))
+		}
+	}
 }
 
 // dot4x4 writes the 16 inner products of rows a0..a3 with rows b0..b3 into
@@ -199,14 +231,22 @@ func dot4x4(a0, a1, a2, a3, b0, b1, b2, b3, o0, o1, o2, o3 []float64) {
 	o3[0], o3[1], o3[2], o3[3] = c30, c31, c32, c33
 }
 
+// TransposeInto sets dst = src^T; dst must be [src.Cols, src.Rows].
+func TransposeInto(dst, src *Mat) {
+	if dst.Rows != src.Cols || dst.Cols != src.Rows {
+		panic(fmt.Sprintf("tensor: TransposeInto %s = %s^T", dst.Shape(), src.Shape()))
+	}
+	for i := 0; i < src.Rows; i++ {
+		for j, v := range src.Row(i) {
+			dst.Data[j*src.Rows+i] = v
+		}
+	}
+}
+
 // transposeOf returns a new matrix holding m^T.
 func transposeOf(m *Mat) *Mat {
 	t := New(m.Cols, m.Rows)
-	for i := 0; i < m.Rows; i++ {
-		for j, v := range m.Row(i) {
-			t.Data[j*m.Rows+i] = v
-		}
-	}
+	TransposeInto(t, m)
 	return t
 }
 

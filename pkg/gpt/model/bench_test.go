@@ -23,6 +23,22 @@ func BenchmarkStep(b *testing.B) {
 	}
 }
 
+// BenchmarkStep512 is BenchmarkStep at context 512 with batch 8, where
+// attention's T*T work dominates the step.
+func BenchmarkStep512(b *testing.B) {
+	rng := rand.New(rand.NewSource(1))
+	cfg := Config{VocabSize: 92, ContextLen: 512, NumLayers: 4, NumHeads: 4, EmbedDim: 128}
+	g := New(cfg, rng)
+	tokens := randomTokens(rng, 8, 512, cfg.VocabSize)
+	dLogits := tensor.Randn(8*512, cfg.VocabSize, 1e-3, rng)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		g.ZeroGrads()
+		g.Forward(tokens)
+		g.Backward(dLogits)
+	}
+}
+
 func BenchmarkForward(b *testing.B) {
 	rng := rand.New(rand.NewSource(1))
 	cfg := Config{VocabSize: 92, ContextLen: 128, NumLayers: 4, NumHeads: 4, EmbedDim: 128}
