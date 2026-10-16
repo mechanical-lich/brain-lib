@@ -28,6 +28,8 @@ go run ./cmd/gpt-generate -prompt "The old house" -n 400
 `gpt-train -resume` continues from the checkpoint (model, optimizer moments
 and tokenizer are all restored). Training is CPU-only float64, so keep models
 small: a 4-layer, 128-wide model at context 128 is a reasonable laptop run.
+New models train with dropout 0.1 (`-dropout`, stored in the checkpoint and
+ignored on `-resume`); it only acts during training steps.
 
 `gpt-fetch` saves books already cleaned by `data.Clean` (unwrapped
 paragraphs, no italics markers or editorial blocks, ASCII quotes); use
@@ -42,7 +44,7 @@ The model only sees `[]int`. To train on, say, robot sensor/action tokens:
    or skip tokenizers entirely and produce ids yourself.
 2. Implement `train.Batcher` (`Batch(rng, batchSize, contextLen) (x, y [][]int)`),
    or feed a flat id stream to `data.NewDataset`.
-3. `model.New(model.Config{VocabSize: n, ContextLen: ..., NumLayers: ..., NumHeads: ..., EmbedDim: ...}, rng)`
+3. `model.New(model.Config{VocabSize: n, ContextLen: ..., NumLayers: ..., NumHeads: ..., EmbedDim: ..., Dropout: 0.1}, rng)`
    and `train.Run(...)` as `cmd/gpt-train` does.
 4. At decision time, call `GPT.Forward` on the recent sensor/action history
    and read the logits of the last row restricted to action ids.

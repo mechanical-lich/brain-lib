@@ -13,6 +13,10 @@ import (
 // logits for every position; Backward takes the gradient of the loss with
 // respect to those logits and accumulates gradients into every Param.
 // The output head shares weights with the token embedding (GPT-2 style).
+//
+// A GPT starts in inference mode: Forward is deterministic and dropout-free.
+// SetTraining(true) turns on dropout (when Config.Dropout > 0), with masks
+// drawn from the rng given to New or SetRNG.
 type GPT struct {
 	Config Config
 
@@ -20,6 +24,10 @@ type GPT struct {
 	PosEmb *Param // [ContextLen, EmbedDim]
 	Blocks []*Block
 	LNF    *LayerNorm
+
+	training bool
+	rng      *rand.Rand // source of dropout masks
+	embDrop  dropout
 
 	// caches for Backward
 	ids    []int // flattened input ids, len B*T
@@ -38,12 +46,24 @@ func New(cfg Config, rng *rand.Rand) *GPT {
 		TokEmb: newParam("tok_emb", tensor.Randn(cfg.VocabSize, cfg.EmbedDim, 0.02, rng), true),
 		PosEmb: newParam("pos_emb", tensor.Randn(cfg.ContextLen, cfg.EmbedDim, 0.02, rng), true),
 		LNF:    NewLayerNorm("ln_f", cfg.EmbedDim),
+		rng:    rng,
 	}
 	for i := 0; i < cfg.NumLayers; i++ {
 		g.Blocks = append(g.Blocks, NewBlock(i, cfg, rng))
 	}
 	return g
 }
+
+// SetTraining switches dropout on (true) or off (false). It has no effect
+// on the forward pass when Config.Dropout is 0.
+func (g *GPT) SetTraining(on bool) { g.training = on }
+
+// Training reports whether the model is in training mode.
+func (g *GPT) Training() bool { return g.training }
+
+// SetRNG replaces the rng dropout masks are drawn from, e.g. to seed a model
+// restored from a checkpoint.
+func (g *GPT) SetRNG(rng *rand.Rand) { g.rng = rng }
 
 // Params lists every trainable parameter in a stable, deterministic order.
 func (g *GPT) Params() []*Param {
@@ -103,8 +123,14 @@ func (g *GPT) Forward(tokens [][]int) *tensor.Mat {
 			}
 		}
 	}
+	var rng *rand.Rand
+	if g.training {
+		rng = g.rng
+	}
+	p := g.Config.Dropout
+	g.embDrop.forward(x, p, rng)
 	for _, blk := range g.Blocks {
-		x = blk.Forward(x, batch, seq)
+		x = blk.forward(x, batch, seq, p, rng)
 	}
 	g.hFinal = g.LNF.Forward(x)
 	// tied output head: logits = h @ TokEmb^T
@@ -123,6 +149,7 @@ func (g *GPT) Backward(dLogits *tensor.Mat) {
 	for i := len(g.Blocks) - 1; i >= 0; i-- {
 		dx = g.Blocks[i].Backward(dx)
 	}
+	dx = g.embDrop.backward(dx, true)
 	// embedding lookups: scatter-add into the rows that were used
 	for r, id := range g.ids {
 		dxr := dx.Row(r)

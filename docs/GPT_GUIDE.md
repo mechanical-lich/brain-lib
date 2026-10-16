@@ -174,17 +174,34 @@ The `(b, h)` pairs are independent, so both passes run them in parallel with
 Pre-norm residual block:
 
 ```
-h   = x + Attn(LN1(x), B, T)
-out = h + MLP(LN2(h))
+h   = x + Drop(Attn(LN1(x), B, T))
+out = h + Drop(MLP(LN2(h)))
 ```
 
 Backward applies the residual rule (gradient flows straight through the
 `+` and also through the branch):
 
 ```
-dh = dy + LN2.Backward(MLP.Backward(dy))
-dx = dh + LN1.Backward(Attn.Backward(dh))
+dh = dy + LN2.Backward(MLP.Backward(M2 * dy))
+dx = dh + LN1.Backward(Attn.Backward(M1 * dh))
 ```
+
+`Drop` is inverted dropout (`model/dropout.go`), GPT-2 style: in training
+mode each element of the branch output (after its `Proj`, before the
+residual add) is zeroed with probability `Config.Dropout` and the survivors
+are scaled by `1/(1-p)`, so the expected value is unchanged and inference
+needs no rescaling. Forward stores the mask `M` (entries `0` or `1/(1-p)`)
+and Backward multiplies the incoming gradient by the same mask. The same
+dropout is applied once more to the embedding sum before the first block.
+
+Dropout only runs when the GPT is in training mode (`SetTraining(true)`).
+A new model starts in inference mode, so `Forward` in `Generate`,
+`Evaluate` and the tests is deterministic; `train.Run` turns training mode
+on just for each step's forward/backward. Masks come from the rng passed to
+`model.New`; `SetRNG` replaces it (`cmd/gpt-train` uses it to seed a model
+restored from a checkpoint). `TestGradientCheckDropout` reseeds the rng
+before every `Forward` so the masks are fixed and finite differences still
+apply.
 
 ### GPT (`model/gpt.go`)
 
@@ -249,8 +266,10 @@ Two helpers go with it:
 opt.Config.LR = schedule(step)
 x, y := batcher.Batch(rng, batchSize, contextLen)   // y[i][t] is the target for x[i][t]
 g.ZeroGrads()
+g.SetTraining(true)                                  // dropout on
 loss, dLogits := train.CrossEntropy(g.Forward(x), flatten(y))
 g.Backward(dLogits)
+g.SetTraining(false)                                 // eval and onStep see no dropout
 norm := train.ClipGradNorm(g.Params(), gradClip)
 opt.Step()
 ```
@@ -264,7 +283,8 @@ than a `data.Dataset`, which is the seam for non-text training (see below).
 
 A `Checkpoint` holds the `model.Config`, the step count, every parameter by
 name, the optimizer's moment estimates and step, and an opaque `Tokenizer`
-byte slice. It is written with `encoding/gob` to a temp file and renamed into
+byte slice. `Config` includes `Dropout`; checkpoints written before that field
+existed load with `Dropout` 0. It is written with `encoding/gob` to a temp file and renamed into
 place, so a checkpoint on disk is never half-written and you can sample from
 it while training continues.
 
@@ -420,8 +440,10 @@ that keeps climbing precedes a divergence by a few hundred steps.
 
 ## Extension Points
 
-- **Dropout**: not implemented. Add it as a mask multiplied in forward and
-  reapplied in backward inside `Block`.
+- **Dropout**: implemented (`Config.Dropout`, `cmd/gpt-train -dropout`,
+  default 0.1 for new models). Attention-weight dropout (on the softmax
+  probabilities, as GPT-2 also does) is not; it would need the mask kept per
+  `B*H*T*T` entry in `CausalSelfAttention` and applied to `dAtt` in Backward.
 - **KV cache**: `Generate` could keep each block's keys and values and only
   compute the new position; `CausalSelfAttention` would need an incremental
   `Forward`.

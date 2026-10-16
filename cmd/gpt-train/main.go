@@ -30,7 +30,7 @@ import (
 func main() {
 	dataPath := flag.String("data", "local_data/gutenberg", "Corpus: a .txt file or a directory of .txt files")
 	out := flag.String("out", "local_data/gpt/model.ckpt", "Checkpoint path")
-	resume := flag.Bool("resume", false, "Resume from -out if it exists (model shape flags are ignored)")
+	resume := flag.Bool("resume", false, "Resume from -out if it exists (model shape and -dropout flags are ignored)")
 	tokKind := flag.String("tokenizer", tokenizer.KindChar, "Tokenizer kind: char or symbol")
 	clean := flag.Bool("clean", false, "Run data.Clean with default options on the corpus before tokenizing (use the same setting when resuming)")
 
@@ -38,6 +38,7 @@ func main() {
 	heads := flag.Int("heads", 4, "Attention heads")
 	dim := flag.Int("dim", 128, "Embedding dimension")
 	ctxLen := flag.Int("ctx", 128, "Context length")
+	dropout := flag.Float64("dropout", 0.1, "Dropout probability in [0, 1) for a new model (ignored on resume)")
 
 	steps := flag.Int("steps", 1000, "Total optimizer steps")
 	batch := flag.Int("batch", 16, "Batch size")
@@ -91,11 +92,14 @@ func main() {
 		if tok, err = tokenizer.Unmarshal(ck.Tokenizer); err != nil {
 			fatal(log, "restore tokenizer", err)
 		}
+		// Draw dropout masks from the run's seeded rng rather than the
+		// fixed one the checkpoint loader builds the model with.
+		g.SetRNG(rng)
 		started = ck.Step
 		log.Info("resumed", "path", *out, "step", started, "config", fmt.Sprintf("%+v", g.Config))
 	} else {
 		tok = newTokenizer(*tokKind, text)
-		cfg := model.Config{VocabSize: tok.VocabSize(), ContextLen: *ctxLen, NumLayers: *layers, NumHeads: *heads, EmbedDim: *dim}
+		cfg := model.Config{VocabSize: tok.VocabSize(), ContextLen: *ctxLen, NumLayers: *layers, NumHeads: *heads, EmbedDim: *dim, Dropout: *dropout}
 		if err := cfg.Validate(); err != nil {
 			fatal(log, "config", err)
 		}

@@ -1,8 +1,10 @@
 package train
 
 import (
+	"encoding/gob"
 	"math"
 	"math/rand"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -102,6 +104,36 @@ func TestRunOverfitsPattern(t *testing.T) {
 	assert.Equal(t, []int{0, 1, 2, 3, 2, 1, 0, 1, 2}, out)
 }
 
+// TestRunWithDropout is the pattern-memorization smoke test with dropout on:
+// training loss is noisier but must still fall well below its start, and the
+// dropout-free validation loss should be low.
+func TestRunWithDropout(t *testing.T) {
+	rng := rand.New(rand.NewSource(2))
+	cfg := model.Config{VocabSize: 4, ContextLen: 8, NumLayers: 2, NumHeads: 2, EmbedDim: 16, Dropout: 0.1}
+	g := model.New(cfg, rng)
+	oc := DefaultAdamW()
+	oc.LR = 1e-2
+	opt := NewAdamW(g.Params(), oc)
+	set := patternBatcher{pattern: []int{0, 1, 2, 3, 2, 1}}
+
+	var first, last Metrics
+	err := Run(g, opt, set, set, Options{Steps: 250, BatchSize: 8, GradClip: 1, EvalEvery: 250, EvalBatches: 2}, rng,
+		func(m Metrics) {
+			if m.Step == 1 {
+				first = m
+			}
+			last = m
+		})
+	require.NoError(t, err)
+	t.Logf("loss %.3f -> %.3f, val %.4f", first.Loss, last.Loss, last.ValLoss)
+	assert.False(t, g.Training(), "Run leaves the model in inference mode")
+	assert.Greater(t, first.Loss, 1.0, "initial loss near log(4)")
+	assert.Less(t, last.Loss, 0.3, "loss should fall despite dropout")
+	assert.Less(t, last.ValLoss, 0.1)
+	out := g.Generate([]int{0, 1, 2}, 6, model.GenerateOptions{}, rng)
+	assert.Equal(t, []int{0, 1, 2, 3, 2, 1, 0, 1, 2}, out)
+}
+
 func TestClipGradNorm(t *testing.T) {
 	rng := rand.New(rand.NewSource(3))
 	g := model.New(tinyCfg, rng)
@@ -163,6 +195,42 @@ func TestCheckpointRoundTrip(t *testing.T) {
 
 	_, err = Load(filepath.Join(t.TempDir(), "missing.ckpt"))
 	assert.Error(t, err)
+}
+
+func TestCheckpointDropout(t *testing.T) {
+	cfg := tinyCfg
+	cfg.Dropout = 0.2
+	g := model.New(cfg, rand.New(rand.NewSource(4)))
+	path := filepath.Join(t.TempDir(), "model.ckpt")
+	require.NoError(t, Save(path, Snapshot(g, nil, 0, nil)))
+	ck, err := Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, cfg, ck.Config)
+	g2, err := ck.Model()
+	require.NoError(t, err)
+	assert.Equal(t, 0.2, g2.Config.Dropout)
+	assert.False(t, g2.Training())
+
+	// A checkpoint written before Config had Dropout decodes with Dropout 0.
+	// gob matches fields by name, so a struct without the field stands in
+	// for the old format.
+	type oldConfig struct{ VocabSize, ContextLen, NumLayers, NumHeads, EmbedDim int }
+	type oldCheckpoint struct {
+		Config oldConfig
+		Step   int
+		Params map[string]MatData
+	}
+	old := oldCheckpoint{Config: oldConfig{tinyCfg.VocabSize, tinyCfg.ContextLen, tinyCfg.NumLayers, tinyCfg.NumHeads, tinyCfg.EmbedDim}, Step: 7, Params: ck.Params}
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	require.NoError(t, gob.NewEncoder(f).Encode(old))
+	require.NoError(t, f.Close())
+	ck, err = Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, tinyCfg, ck.Config)
+	assert.Equal(t, 0.0, ck.Config.Dropout)
+	_, err = ck.Model()
+	require.NoError(t, err)
 }
 
 func TestRunRejectsBadOptions(t *testing.T) {
