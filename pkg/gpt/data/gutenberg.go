@@ -42,7 +42,8 @@ func GutenbergURL(id int) string {
 }
 
 // Fetch downloads book into dir as <id>.txt with the Gutenberg header and
-// footer stripped, and returns the path. An existing file is left alone
+// footer stripped and the body run through Clean with DefaultCleanOptions,
+// and returns the path. An existing file is left alone
 // and returned as-is.
 func Fetch(ctx context.Context, client *http.Client, book Book, dir string) (string, error) {
 	if client == nil {
@@ -72,8 +73,8 @@ func Fetch(ctx context.Context, client *http.Client, book Book, dir string) (str
 	if err != nil {
 		return "", err
 	}
-	text := StripBoilerplate(string(raw))
-	if len(text) == 0 {
+	text := Clean(StripBoilerplate(string(raw)), DefaultCleanOptions())
+	if strings.TrimSpace(text) == "" {
 		return "", fmt.Errorf("data: fetch %d: empty text after stripping", book.ID)
 	}
 	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {

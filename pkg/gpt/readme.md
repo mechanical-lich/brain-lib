@@ -13,7 +13,7 @@ retargeted from prose to any discrete token stream.
 | `tokenizer/` | `Tokenizer` interface with `Char` (one token per rune) and `Symbol` (one token per whitespace-separated symbol). JSON `Marshal`/`Unmarshal`. BPE slots in here later. |
 | `model/`     | `Config`, `Param`, `Linear`, `LayerNorm`, `CausalSelfAttention`, `MLP`, `Block`, `GPT` (tied embedding / output head), and `Generate`. Every layer has `Forward` and `Backward`. |
 | `train/`     | `CrossEntropy`, `AdamW` + `ClipGradNorm` + `Cosine` LR schedule, gob checkpoints (`Snapshot`/`Save`/`Load`), and `Run`, a training loop over any `Batcher`. |
-| `data/`      | `Dataset` (random windows from a token stream, satisfies `train.Batcher`), `Split`, `ReadText`, and the Project Gutenberg fetcher. |
+| `data/`      | `Dataset` (random windows from a token stream, satisfies `train.Batcher`), `Split`, `ReadText`, `Clean` (corpus normalization), and the Project Gutenberg fetcher. |
 
 Commands live in `cmd/gpt-fetch`, `cmd/gpt-train`, `cmd/gpt-generate`.
 
@@ -28,6 +28,11 @@ go run ./cmd/gpt-generate -prompt "The old house" -n 400
 `gpt-train -resume` continues from the checkpoint (model, optimizer moments
 and tokenizer are all restored). Training is CPU-only float64, so keep models
 small: a 4-layer, 128-wide model at context 128 is a reasonable laptop run.
+
+`gpt-fetch` saves books already cleaned by `data.Clean` (unwrapped
+paragraphs, no italics markers or editorial blocks, ASCII quotes); use
+`gpt-train -clean` for corpora from elsewhere. Cleaning changes the char
+vocabulary, so it must be the same for the first run and any `-resume` run.
 
 ## Using it for something other than text
 

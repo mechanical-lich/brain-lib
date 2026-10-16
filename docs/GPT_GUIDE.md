@@ -284,6 +284,41 @@ Sampling options: `Temperature <= 0` is greedy argmax; otherwise logits are
 divided by the temperature, optionally truncated to the `TopK` largest, and
 sampled from the softmax.
 
+## Cleaning the corpus (`data/clean.go`)
+
+A character-level model spends capacity on every distinct rune and every
+recurring pattern, so typesetting noise in the source text is learned as if
+it were prose. Project Gutenberg files hard-wrap lines at about 70 columns,
+mark italics with `_underscores_`, carry `[Illustration: ...]`,
+`[Footnote N: ...]`, `[Transcriber's Note: ...]` and `[Source: ...]` blocks, mix curly and
+straight quotes, and occasionally contain mojibake such as `Ã¤` for `ä`.
+
+`data.Clean(text, data.DefaultCleanOptions())` fixes this, in order:
+
+1. normalize CRLF to LF;
+2. drop bracketed editorial blocks (matched across lines) and `[1]`-style
+   footnote references;
+3. strip italic underscores, keeping the words;
+4. turn curly quotes and the acute accent used as an apostrophe into ASCII
+   quotes, en/em dashes into `--` (`NormalizePunctuation`);
+5. repair two-rune mojibake and delete leftover mojibake runes, keeping real
+   accented letters and `æ`/`œ`;
+6. unwrap hard line breaks so each paragraph is one line; a blank line is a
+   paragraph break and an indented line (verse, epigraph) stays on its own
+   line with a four-space indent;
+7. collapse runs of spaces and of more than two newlines.
+
+`DropHeader` (off by default) also removes the title/author lines before the
+first paragraph longer than 200 characters.
+
+`gpt-fetch` applies the defaults to every downloaded book, and
+`gpt-train -clean` applies them to any corpus before tokenizing. Because the
+`Char` tokenizer's vocabulary is the set of runes in the training text,
+cleaning changes the vocabulary: decide on it before the first run and use
+the same setting for every resumed run and for any text added later.
+`gpt-train` logs the vocabulary size and warns when the corpus contains runes
+the checkpoint's tokenizer has never seen.
+
 ## Tokenizers (`tokenizer/`)
 
 The model never sees text. `Tokenizer` is a four-method interface
