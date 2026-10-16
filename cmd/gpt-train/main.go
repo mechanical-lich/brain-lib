@@ -3,6 +3,7 @@
 //	go run ./cmd/gpt-fetch
 //	go run ./cmd/gpt-train -data local_data/gutenberg -steps 2000
 //	go run ./cmd/gpt-train -resume -steps 4000   # continue from the checkpoint
+//	go run ./cmd/gpt-train -data my_corpus -clean   # normalize user-supplied text first
 //
 // The -tokenizer flag picks how text becomes tokens: "char" (one token per
 // rune) or "symbol" (one token per whitespace-separated word/symbol, which is
@@ -31,6 +32,7 @@ func main() {
 	out := flag.String("out", "local_data/gpt/model.ckpt", "Checkpoint path")
 	resume := flag.Bool("resume", false, "Resume from -out if it exists (model shape flags are ignored)")
 	tokKind := flag.String("tokenizer", tokenizer.KindChar, "Tokenizer kind: char or symbol")
+	clean := flag.Bool("clean", false, "Run data.Clean with default options on the corpus before tokenizing (use the same setting when resuming)")
 
 	layers := flag.Int("layers", 4, "Transformer blocks")
 	heads := flag.Int("heads", 4, "Attention heads")
@@ -58,6 +60,12 @@ func main() {
 	text, err := data.ReadText(*dataPath)
 	if err != nil {
 		fatal(log, "read corpus", err)
+	}
+	if *clean {
+		before := distinctRunes(text)
+		raw := len(text)
+		text = data.Clean(text, data.DefaultCleanOptions())
+		log.Info("cleaned corpus", "bytes_before", raw, "bytes_after", len(text), "runes_before", before, "runes_after", distinctRunes(text))
 	}
 
 	var (
@@ -102,7 +110,16 @@ func main() {
 
 	tokens := tok.Encode(text)
 	trainSet, valSet := data.Split(tokens, *valFrac)
-	log.Info("corpus", "chars", len(text), "tokens", len(tokens), "vocab", tok.VocabSize())
+	unknown := 0
+	for _, id := range tokens {
+		if id == tokenizer.UnknownToken {
+			unknown++
+		}
+	}
+	log.Info("corpus", "chars", len(text), "tokens", len(tokens), "vocab", tok.VocabSize(), "unknown", unknown)
+	if unknown > 0 {
+		log.Warn("corpus has tokens outside the vocabulary; was -clean set the same way as the first run?", "unknown", unknown)
+	}
 
 	opts := train.Options{
 		Steps: *steps, StartStep: started, BatchSize: *batch,
@@ -156,6 +173,14 @@ func newTokenizer(kind, text string) tokenizer.Tokenizer {
 		os.Exit(2)
 		return nil
 	}
+}
+
+func distinctRunes(s string) int {
+	seen := map[rune]struct{}{}
+	for _, r := range s {
+		seen[r] = struct{}{}
+	}
+	return len(seen)
 }
 
 func round(v float64) float64 { return math.Round(v*1e4) / 1e4 }
