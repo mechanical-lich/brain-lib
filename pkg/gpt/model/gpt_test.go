@@ -167,3 +167,100 @@ func TestGeluGrad(t *testing.T) {
 		assert.InDelta(t, num, geluGrad(x), 1e-7)
 	}
 }
+
+func TestConfigValidateDropout(t *testing.T) {
+	for _, p := range []float64{0, 0.1, 0.5, 0.999} {
+		c := tinyCfg
+		c.Dropout = p
+		assert.NoError(t, c.Validate(), "dropout %g", p)
+	}
+	for _, p := range []float64{-0.1, 1, 1.5, math.NaN()} {
+		c := tinyCfg
+		c.Dropout = p
+		assert.Error(t, c.Validate(), "dropout %g", p)
+	}
+}
+
+// TestGradientCheckDropout is TestGradientCheck with dropout active. The rng
+// is reseeded identically before every Forward so each pass draws the same
+// masks, which makes the loss a smooth function of the weights again.
+func TestGradientCheckDropout(t *testing.T) {
+	cfg := tinyCfg
+	cfg.Dropout = 0.3
+	rng := rand.New(rand.NewSource(43))
+	g := New(cfg, rng)
+	for _, p := range g.Params() {
+		if p.Decay {
+			p.Value.Scale(10)
+		}
+	}
+	g.SetTraining(true)
+	tokens := randomTokens(rng, 2, 4, cfg.VocabSize)
+	w := tensor.Randn(2*4, cfg.VocabSize, 1, rng)
+	forward := func() *tensor.Mat {
+		g.SetRNG(rand.New(rand.NewSource(1234)))
+		return g.Forward(tokens)
+	}
+
+	g.ZeroGrads()
+	_, dLogits := testLoss(forward(), w)
+	g.Backward(dLogits)
+
+	// the masks must actually drop something, or this is just TestGradientCheck
+	zeros := 0
+	for _, m := range g.embDrop.mask {
+		if m == 0 {
+			zeros++
+		}
+	}
+	require.Greater(t, zeros, 0)
+
+	const eps = 1e-5
+	checked := 0
+	for _, p := range g.Params() {
+		n := p.Size()
+		for k := 0; k < 6 && k < n; k++ {
+			idx := rng.Intn(n)
+			orig := p.Value.Data[idx]
+			p.Value.Data[idx] = orig + eps
+			lp, _ := testLoss(forward(), w)
+			p.Value.Data[idx] = orig - eps
+			lm, _ := testLoss(forward(), w)
+			p.Value.Data[idx] = orig
+			numeric := (lp - lm) / (2 * eps)
+			analytic := p.Grad.Data[idx]
+			tol := 1e-7 + 1e-5*math.Abs(analytic)
+			assert.InDeltaf(t, numeric, analytic, tol, "param %s[%d]: numeric %g analytic %g", p.Name, idx, numeric, analytic)
+			checked++
+		}
+	}
+	require.Greater(t, checked, 50)
+}
+
+// TestDropoutTrainingMode checks that dropout only acts in training mode and
+// that its masks come from the model's rng.
+func TestDropoutTrainingMode(t *testing.T) {
+	cfg := tinyCfg
+	cfg.Dropout = 0.5
+	rng := rand.New(rand.NewSource(5))
+	g := New(cfg, rng)
+	plain := New(tinyCfg, rand.New(rand.NewSource(5)))
+	tokens := randomTokens(rng, 2, 5, cfg.VocabSize)
+
+	assert.False(t, g.Training(), "models start in inference mode")
+	eval := g.Forward(tokens)
+	assert.Equal(t, plain.Forward(tokens).Data, eval.Data, "inference mode ignores Dropout")
+
+	g.SetTraining(true)
+	g.SetRNG(rand.New(rand.NewSource(1)))
+	a := g.Forward(tokens)
+	b := g.Forward(tokens)
+	g.SetRNG(rand.New(rand.NewSource(1)))
+	c := g.Forward(tokens)
+	assert.NotEqual(t, eval.Data, a.Data, "training mode drops activations")
+	assert.NotEqual(t, a.Data, b.Data, "fresh masks each Forward")
+	assert.Equal(t, a.Data, c.Data, "same seed, same masks")
+
+	g.SetTraining(false)
+	assert.Equal(t, eval.Data, g.Forward(tokens).Data)
+}

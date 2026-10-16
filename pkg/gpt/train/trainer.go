@@ -43,7 +43,8 @@ type Metrics struct {
 
 // Run trains g with opt for opts.Steps steps, calling onStep after each.
 // val may be nil to disable validation. The caller owns rng so runs are
-// reproducible.
+// reproducible. g is in training mode (dropout on) only for each step's
+// forward/backward and is left in inference mode.
 func Run(g *model.GPT, opt *AdamW, trainSet, val Batcher, opts Options, rng *rand.Rand, onStep func(Metrics)) error {
 	if opts.BatchSize <= 0 {
 		return fmt.Errorf("train: BatchSize must be > 0")
@@ -66,8 +67,12 @@ func Run(g *model.GPT, opt *AdamW, trainSet, val Batcher, opts Options, rng *ran
 
 		x, y := trainSet.Batch(rng, opts.BatchSize, ctx)
 		g.ZeroGrads()
+		// Dropout only for the training forward/backward; validation and
+		// any sampling in onStep see the deterministic model.
+		g.SetTraining(true)
 		loss, dLogits := CrossEntropy(g.Forward(x), flatten(y))
 		g.Backward(dLogits)
+		g.SetTraining(false)
 		norm := ClipGradNorm(g.Params(), opts.GradClip)
 		opt.Step()
 

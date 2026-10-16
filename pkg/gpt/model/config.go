@@ -16,6 +16,11 @@ type Config struct {
 	NumLayers  int `json:"numLayers"`  // transformer blocks
 	NumHeads   int `json:"numHeads"`   // attention heads per block
 	EmbedDim   int `json:"embedDim"`   // residual stream width
+
+	// Dropout is the probability of zeroing an activation during training
+	// (on the embedding sum and on each attention and MLP output before its
+	// residual add). 0 disables it; it never applies outside training mode.
+	Dropout float64 `json:"dropout"`
 }
 
 // Validate reports whether the configuration is usable.
@@ -33,6 +38,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("model: EmbedDim must be > 0, got %d", c.EmbedDim)
 	case c.EmbedDim%c.NumHeads != 0:
 		return fmt.Errorf("model: EmbedDim %d not divisible by NumHeads %d", c.EmbedDim, c.NumHeads)
+	case !(c.Dropout >= 0 && c.Dropout < 1):
+		return fmt.Errorf("model: Dropout must be in [0, 1), got %g", c.Dropout)
 	}
 	return nil
 }
