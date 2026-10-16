@@ -58,6 +58,10 @@ Every kernel is WGSL in a Go string with a `main` compute entry point.
 | method | CPU counterpart it is tested against |
 |---|---|
 | `MatMul`, `MatMulT`, `MatMulTA` (`accumulate` gives `C +=`) | `tensor.MatMul`, `MatMulT`, `MatMulTA` |
+| `GEMM` epilogue: `Bias` by column, then `Mode` (`EpilogueGELU` writes `gelu(result)` to `Out2`; `EpilogueDropoutResidual` writes the mask to `Out2` and `Aux + mask*result` to C; `EpilogueResidual`; `EpilogueGELUGrad` multiplies by `gelu'(Aux)`) | the plain product followed by the CPU `AddRow`, `gelu`, dropout mask, residual add and `geluGrad` |
+| split-K: a plain product with few output tiles and deep K runs as K-slices into a scratch and a reduce (automatic) | the same `tensor` products |
+| `MulInto` (z = x*y in one pass) | element-wise multiply |
+| `LayerNormBackwardAdd` (dx = LN'(dy) + res) | `model.LayerNorm.Backward` plus `Add` |
 | `GEMM`: strided, batched, any of the three variants, operands at offsets inside larger tensors | per-head `tensor` products on the `[B*T, 3D]` qkv layout |
 | `Transpose` | `tensor.TransposeInto` |
 | `Softmax(x, scale, causal)`, `SoftmaxBackward` (row-wise, in place, causal over `[B*H*T, T]`) | `model.causalSoftmax` / `causalSoftmaxBackward` (mirrored in the test; they are unexported) |
@@ -156,6 +160,48 @@ row's values in named registers instead of re-reading global memory, or
 using smaller workgroups for 256-wide rows. `ColSum` and the LayerNorm
 gain/bias reduction use only `ceil(cols/32)` workgroups. A split-rows
 two-stage version would fill the GPU better at width 384.
+
+### After the fusion pass (phase 3b)
+
+The step profile in `pkg/gpt/gpumodel` showed the row kernels were bound not
+by bandwidth but by the latency of their workgroup reductions (one row per
+256-thread workgroup, sixteen barrier rounds for a 256-wide row), and that
+the elementwise passes were small on the M5's 200 GB/s but not on the
+Radeon's 67. Changes, all verified against the CPU at the previous
+tolerances:
+
+- **Fused matmul epilogue.** Bias, GELU (writing both pre-activation and
+  activation), dropout plus residual (writing the mask), residual, and
+  GELU-gradient run as the result is stored. A forward sub-layer is now one
+  dispatch; the GELU backward disappears into the gradient matmul.
+- **128-row tiles** for products with M >= 1024: eight accumulators per
+  thread, half the workgroup-memory traffic per FLOP. Selected by M; the
+  64-row tile stays for shorter products so they keep enough workgroups.
+- **Split-K** for plain products with fewer than 512 output tiles and K >=
+  1024 (the weight gradients): K-slices as batch entries into a scratch,
+  then a fixed-order reduce.
+- **Lane row kernels** (`rows_lane.go`) for rows up to 512 wide: four rows
+  per workgroup, 64 lanes per row, eight registers per lane, six barrier
+  rounds shared by four rows. Rows up to 1024 use a one-row register kernel
+  (`rows_reg.go`); wider rows keep the multi-pass kernels.
+- `MulInto` and `LayerNormBackwardAdd` fold the dropout backward's copy and
+  the residual gradient add into one pass each.
+
+Apple M5, same benchmarks, before and after:
+
+| benchmark | before | after |
+|---|---|---|
+| NN fc forward 4096x384x1536 | 1296 GFLOP/s | **1490** |
+| NN proj forward 4096x1536x384 | 1247 | 1390 |
+| NT logits forward 4096x384x2000 | 1271 | 1461 |
+| NT fc dx 4096x1536x384 | 1247 | 1388 |
+| NN logits dx 4096x2000x384 | 1251 | 1462 |
+| TN fc dW 384x4096x1536 (split-K, 64-row tile) | 1118 | 1235 |
+| TN emb dW 2000x4096x384 | 1146 | 1414 |
+| LayerNorm forward 4096x384 | 56 GB/s | **134** |
+| LayerNorm backward (dx + dg/db) | 68 | 111 |
+| causal softmax forward 24576x256 | 29 | **106** |
+| causal softmax backward | 71 | 175 |
 
 ## Constraints phase two must respect
 

@@ -68,7 +68,14 @@ struct P { rows: u32, cols: u32, scale: f32, causal: u32 }
 // x is [B*H*T, T] (one row per query) and row r attends to keys
 // [0, r % T]; the masked tail is set to 0.
 func (b *CommandBatch) Softmax(x *Tensor, scale float64, causal bool) {
-	b.dispatch(kSoftmax, grid(x.Rows), []uint32{uint32(x.Rows), uint32(x.Cols), fbits(scale), flag(causal)}, x.buf)
+	k, g := kSoftmax, grid(x.Rows)
+	switch {
+	case x.Cols <= laneCols:
+		k, g = kSoftmaxLane, laneGrid(x.Rows)
+	case x.Cols <= regCols:
+		k = kSoftmaxReg
+	}
+	b.dispatch(k, g, []uint32{uint32(x.Rows), uint32(x.Cols), fbits(scale), flag(causal)}, x.buf)
 }
 
 // SoftmaxBackward records, in place, d = att * (d - rowsum(att*d)) * scale
@@ -76,7 +83,14 @@ func (b *CommandBatch) Softmax(x *Tensor, scale float64, causal bool) {
 // before scaling, from the gradient with respect to att.
 func (b *CommandBatch) SoftmaxBackward(d, att *Tensor, scale float64, causal bool) {
 	b.same("SoftmaxBackward", att, d)
-	b.dispatch(kSoftmaxBackward, grid(d.Rows), []uint32{uint32(d.Rows), uint32(d.Cols), fbits(scale), flag(causal)}, att.buf, d.buf)
+	k, g := kSoftmaxBackward, grid(d.Rows)
+	switch {
+	case d.Cols <= laneCols:
+		k, g = kSoftmaxBackwardLane, laneGrid(d.Rows)
+	case d.Cols <= regCols:
+		k = kSoftmaxBackwardReg
+	}
+	b.dispatch(k, g, []uint32{uint32(d.Rows), uint32(d.Cols), fbits(scale), flag(causal)}, att.buf, d.buf)
 }
 
 var kLayerNorm = &kernel{name: "layernorm", binds: "rrrwww", src: wgslReduce + `
@@ -107,14 +121,15 @@ struct P { rows: u32, cols: u32, eps: f32, pad0: u32 }
 }
 `}
 
-var kLayerNormBackward = &kernel{name: "layernorm_backward", binds: "rrrrw", src: wgslReduce + `
-struct P { rows: u32, cols: u32, pad0: u32, pad1: u32 }
+var kLayerNormBackward = &kernel{name: "layernorm_backward", binds: "rrrrrw", src: wgslReduce + `
+struct P { rows: u32, cols: u32, hasres: u32, pad1: u32 }
 @group(0) @binding(0) var<storage, read> dy: array<f32>;
 @group(0) @binding(1) var<storage, read> xhat: array<f32>;
 @group(0) @binding(2) var<storage, read> rstd: array<f32>;
 @group(0) @binding(3) var<storage, read> g: array<f32>;
-@group(0) @binding(4) var<storage, read_write> dx: array<f32>;
-@group(0) @binding(5) var<uniform> p: P;
+@group(0) @binding(4) var<storage, read> res: array<f32>;
+@group(0) @binding(5) var<storage, read_write> dx: array<f32>;
+@group(0) @binding(6) var<uniform> p: P;
 ` + rowHead + `    let inv_n = 1.0 / f32(p.cols);
     var s: f32 = 0.0;
     var sx: f32 = 0.0;
@@ -128,7 +143,9 @@ struct P { rows: u32, cols: u32, pad0: u32, pad1: u32 }
     let r = rstd[row];
     for (var j = li; j < p.cols; j = j + 256u) {
         let dxh = dy[base + j] * g[j];
-        dx[base + j] = r * (dxh - mean_d - xhat[base + j] * mean_dx);
+        var v = r * (dxh - mean_d - xhat[base + j] * mean_dx);
+        if (p.hasres != 0u) { v = v + res[base + j]; }
+        dx[base + j] = v;
     }
 }
 `}
@@ -154,19 +171,46 @@ func (b *CommandBatch) LayerNorm(y, xhat, rstd, x, g, bias *Tensor, eps float64)
 	if g.Len() != x.Cols || bias.Len() != x.Cols || rstd.Len() != x.Rows {
 		panic(fmt.Sprintf("gpu: LayerNorm of %s with gain %s, bias %s, rstd %s", x.Shape(), g.Shape(), bias.Shape(), rstd.Shape()))
 	}
-	b.dispatch(kLayerNorm, grid(x.Rows), []uint32{uint32(x.Rows), uint32(x.Cols), fbits(eps), 0}, x.buf, g.buf, bias.buf, y.buf, xhat.buf, rstd.buf)
+	k, gr := kLayerNorm, grid(x.Rows)
+	switch {
+	case x.Cols <= laneCols:
+		k, gr = kLayerNormLane, laneGrid(x.Rows)
+	case x.Cols <= regCols:
+		k = kLayerNormReg
+	}
+	b.dispatch(k, gr, []uint32{uint32(x.Rows), uint32(x.Cols), fbits(eps), 0}, x.buf, g.buf, bias.buf, y.buf, xhat.buf, rstd.buf)
 }
 
 // LayerNormBackward records the backward pass of model.LayerNorm: dx from
 // dy and the forward's xhat and rstd, and dg += sum(dy*xhat), db += sum(dy)
 // over rows (accumulated, like the CPU parameter gradients).
 func (b *CommandBatch) LayerNormBackward(dx, dg, db, dy, xhat, rstd, g *Tensor) {
+	b.LayerNormBackwardAdd(dx, dg, db, dy, xhat, rstd, g, nil)
+}
+
+// LayerNormBackwardAdd is LayerNormBackward with the residual connection's
+// gradient folded in: dx = LN'(dy) + res (res may be nil). In a pre-norm
+// block the gradient into x is the LayerNorm's input gradient plus the
+// gradient that skipped the sub-layer, so this saves a pass over dx.
+func (b *CommandBatch) LayerNormBackwardAdd(dx, dg, db, dy, xhat, rstd, g, res *Tensor) {
 	b.same("LayerNormBackward", dy, dx)
 	b.same("LayerNormBackward", dy, xhat)
 	if g.Len() != dy.Cols || dg.Len() != dy.Cols || db.Len() != dy.Cols || rstd.Len() != dy.Rows {
 		panic(fmt.Sprintf("gpu: LayerNormBackward of %s with gain %s, dg %s, db %s, rstd %s", dy.Shape(), g.Shape(), dg.Shape(), db.Shape(), rstd.Shape()))
 	}
-	b.dispatch(kLayerNormBackward, grid(dy.Rows), []uint32{uint32(dy.Rows), uint32(dy.Cols), 0, 0}, dy.buf, xhat.buf, rstd.buf, g.buf, dx.buf)
+	resBuf, hasres := b.d.dummyR, uint32(0)
+	if res != nil {
+		b.same("LayerNormBackwardAdd", dy, res)
+		resBuf, hasres = res.buf, 1
+	}
+	k, gr := kLayerNormBackward, grid(dy.Rows)
+	switch {
+	case dy.Cols <= laneCols:
+		k, gr = kLayerNormBackwardLane, laneGrid(dy.Rows)
+	case dy.Cols <= regCols:
+		k = kLayerNormBackwardReg
+	}
+	b.dispatch(k, gr, []uint32{uint32(dy.Rows), uint32(dy.Cols), hasres, 0}, dy.buf, xhat.buf, rstd.buf, g.buf, resBuf, dx.buf)
 	b.dispatch(kLayerNormGrads, [3]uint32{uint32(ceilDiv(dy.Cols, 32)), 1, 1}, []uint32{uint32(dy.Rows), uint32(dy.Cols), 0, 0}, dy.buf, xhat.buf, dg.buf, db.buf)
 }
 

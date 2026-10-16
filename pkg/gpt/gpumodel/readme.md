@@ -105,9 +105,32 @@ vocabulary 2000, context 256, batch 16, dropout 0.1), five iterations:
 | | ms per training step |
 |---|---|
 | CPU, `model` + `train` (float64, all cores) | 2525 |
-| GPU, `gpumodel.TrainStep` | 308 |
+| GPU, `gpumodel.TrainStep`, phase two | 308 |
+| GPU, after the fusion pass (below) | **255** |
 
-8.2x on this machine. The phase-one kernels ran about 15% faster on the AMD
+9.9x on this machine.
+
+### Where a step goes
+
+`TestProfileStep` (run with `-v`) submits the step as named phases and
+prints their GPU time; `Model.Profile` is the API behind it. On the M5 at
+this shape, before any fusion, the matmul phases were about three quarters
+of the step and ran at the kernel benchmarks' rate, the attention products
+about a tenth, and the row and elementwise kernels the rest. That ruled
+out a hidden matmul problem and pointed at three things, done in order:
+
+| change | step on the M5 |
+|---|---|
+| phase two baseline | 308 ms |
+| fused epilogues (bias, GELU, dropout+residual, GELU-grad), `MulInto`, residual in LayerNorm backward | 304 |
+| lane row kernels for LayerNorm and softmax (latency-bound, not bandwidth-bound) | 290 |
+| 128-row matmul tiles for M >= 1024 | 259 |
+| split-K for the weight gradients | 255 |
+
+The elementwise fusions bought little here because the M5 has 200 GB/s;
+they matter on the Radeon 780M's 67 GB/s, where the real run reported 535
+ms per step before this pass. Not yet re-measured there; the test binary
+build below is how. The phase-one kernels ran about 15% faster on the AMD
 Radeon 780M server than here, and that server's CPU step is 7.9 s, so the
 GPU step there should land near 30x. Not yet measured there; the cross
 compiled test binary is the way to do it:

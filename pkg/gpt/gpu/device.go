@@ -63,6 +63,10 @@ type Device struct {
 	staging []byte // host copy of the arena, written with one WriteBuffer per chunk at submit
 
 	partials  *wgpu.Buffer // scratch for the first stage of Sum
+	dummyR    *wgpu.Buffer // bound to unused read-only operand slots
+	dummyW    *wgpu.Buffer // bound to unused read_write operand slots
+	splitk    *Tensor      // scratch for split-K partial products, grown on demand
+	retired   []*Tensor    // outgrown scratches, released when the recording batch is submitted
 	recording bool
 
 	mu sync.Mutex // guards Close against double release only
@@ -147,6 +151,12 @@ func Open() (*Device, error) {
 		groups:    map[groupKey]*wgpu.BindGroup{},
 	}
 	d.partials, err = d.newBuffer("sum-partials", sumMaxPartials*4, 0)
+	if err == nil {
+		d.dummyR, err = d.newBuffer("dummy-r", 16, 0)
+	}
+	if err == nil {
+		d.dummyW, err = d.newBuffer("dummy-w", 16, 0)
+	}
 	if err != nil {
 		d.Close()
 		return nil, err
@@ -181,6 +191,16 @@ func (d *Device) Close() {
 	}
 	for _, a := range d.arena {
 		a.Release()
+	}
+	d.releaseRetired()
+	if d.splitk != nil {
+		d.splitk.Release()
+		d.splitk = nil
+	}
+	for _, buf := range []*wgpu.Buffer{d.dummyR, d.dummyW} {
+		if buf != nil {
+			buf.Release()
+		}
 	}
 	if d.partials != nil {
 		d.partials.Release()

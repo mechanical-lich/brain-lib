@@ -143,7 +143,10 @@ func (b *CommandBatch) Submit() error {
 	}
 	b.done = true
 	d := b.d
-	defer func() { d.recording = false }()
+	defer func() {
+		d.recording = false
+		d.releaseRetired()
+	}()
 	if b.err != nil {
 		if b.enc != nil {
 			b.enc.DiscardEncoding()

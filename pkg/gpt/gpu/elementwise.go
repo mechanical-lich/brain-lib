@@ -71,6 +71,29 @@ const geluWGSL = `
 const GELU_C: f32 = 0.7978845608028654;
 const GELU_K: f32 = 0.044715;
 fn tanh_arg(x: f32) -> f32 { return clamp(GELU_C * (x + GELU_K * x * x * x), -15.0, 15.0); }
+fn gelu(v: f32) -> f32 { return 0.5 * v * (1.0 + tanh(tanh_arg(v))); }
+fn gelu_grad(v: f32) -> f32 {
+    let t = tanh(tanh_arg(v));
+    let du = GELU_C * (1.0 + 3.0 * GELU_K * v * v);
+    return 0.5 * (1.0 + t) + 0.5 * v * (1.0 - t * t) * du;
+}
+`
+
+// dropoutWGSL is the counter-based dropout mask: pcg is the PCG-RXS-M-XS
+// 32-bit hash and dropmask returns 0 or scale for element i. dropoutHash in
+// Go mirrors pcg for the tests.
+const dropoutWGSL = `
+fn pcg(v: u32) -> u32 {
+    let s = v * 747796405u + 2891336453u;
+    let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+fn dropmask(i: u32, prob: f32, scale: f32, seed: u32, step: u32) -> f32 {
+    let h = pcg(i ^ pcg(seed ^ pcg(step)));
+    let u = f32(h >> 8u) * (1.0 / 16777216.0);
+    if (u < prob) { return 0.0; }
+    return scale;
+}
 `
 
 var kGELU = &kernel{name: "gelu", binds: "rw", src: geluWGSL + `
@@ -78,8 +101,7 @@ struct P { n: u32, pad0: u32, pad1: u32, pad2: u32 }
 @group(0) @binding(0) var<storage, read> x: array<f32>;
 @group(0) @binding(1) var<storage, read_write> y: array<f32>;
 @group(0) @binding(2) var<uniform> p: P;
-` + elemHead + `    let v = x[i];
-    y[i] = 0.5 * v * (1.0 + tanh(tanh_arg(v)));
+` + elemHead + `    y[i] = gelu(x[i]);
 }
 `}
 
@@ -88,10 +110,7 @@ struct P { n: u32, pad0: u32, pad1: u32, pad2: u32 }
 @group(0) @binding(0) var<storage, read> pre: array<f32>;
 @group(0) @binding(1) var<storage, read_write> d: array<f32>;
 @group(0) @binding(2) var<uniform> p: P;
-` + elemHead + `    let v = pre[i];
-    let t = tanh(tanh_arg(v));
-    let du = GELU_C * (1.0 + 3.0 * GELU_K * v * v);
-    d[i] = d[i] * (0.5 * (1.0 + t) + 0.5 * v * (1.0 - t * t) * du);
+` + elemHead + `    d[i] = d[i] * gelu_grad(pre[i]);
 }
 `}
 
@@ -99,23 +118,24 @@ struct P { n: u32, pad0: u32, pad1: u32, pad2: u32 }
 // so it needs no RNG state on the device, is reproducible for a given seed
 // and step, and changes every step. pcg is the PCG-RXS-M-XS 32-bit hash;
 // dropoutHash in Go mirrors it for the tests.
-var kDropout = &kernel{name: "dropout", binds: "ww", src: `
+var kDropout = &kernel{name: "dropout", binds: "ww", src: dropoutWGSL + `
 struct P { n: u32, p: f32, scale: f32, seed: u32, step: u32, pad0: u32, pad1: u32, pad2: u32 }
 @group(0) @binding(0) var<storage, read_write> y: array<f32>;
 @group(0) @binding(1) var<storage, read_write> mask: array<f32>;
 @group(0) @binding(2) var<uniform> p: P;
-
-fn pcg(v: u32) -> u32 {
-    let s = v * 747796405u + 2891336453u;
-    let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
-    return (w >> 22u) ^ w;
-}
-` + elemHead + `    let h = pcg(i ^ pcg(p.seed ^ pcg(p.step)));
-    let u = f32(h >> 8u) * (1.0 / 16777216.0);
-    var m = p.scale;
-    if (u < p.p) { m = 0.0; }
+` + elemHead + `    let m = dropmask(i, p.p, p.scale, p.seed, p.step);
     mask[i] = m;
     y[i] = y[i] * m;
+}
+`}
+
+var kMulInto = &kernel{name: "mul_into", binds: "rrw", src: `
+struct P { n: u32, pad0: u32, pad1: u32, pad2: u32 }
+@group(0) @binding(0) var<storage, read> x: array<f32>;
+@group(0) @binding(1) var<storage, read> y: array<f32>;
+@group(0) @binding(2) var<storage, read_write> z: array<f32>;
+@group(0) @binding(3) var<uniform> p: P;
+` + elemHead + `    z[i] = x[i] * y[i];
 }
 `}
 
@@ -158,6 +178,14 @@ func (b *CommandBatch) Scale(y *Tensor, s float64) {
 func (b *CommandBatch) Mul(y, x *Tensor) {
 	b.same("Mul", x, y)
 	b.dispatch(kMul, elems(y.Len()), []uint32{uint32(y.Len()), 0, 0, 0}, x.buf, y.buf)
+}
+
+// MulInto records z = x * y element-wise in one pass: the dropout backward
+// into a separate buffer without a Copy first.
+func (b *CommandBatch) MulInto(z, x, y *Tensor) {
+	b.same("MulInto", x, y)
+	b.same("MulInto", x, z)
+	b.dispatch(kMulInto, elems(z.Len()), []uint32{uint32(z.Len()), 0, 0, 0}, x.buf, y.buf, z.buf)
 }
 
 // AddRow records y[i,j] += bias[j] (bias broadcast) for bias [1, y.Cols].
