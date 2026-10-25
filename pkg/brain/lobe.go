@@ -373,7 +373,7 @@ func (l *Lobe) Step(dt float64, now int, fallbackModulators map[string]*Modulato
 					// pre*weight. Using pre*contribution made this pre^2*weight
 					// — a trace that grew with the square of the source's
 					// activation and could never be negative.
-					decay := decayFactor(l.PlasticityConfig.TraceDecay, dt)
+					decay := decayFactor(traceDecayFor(s, l.PlasticityConfig), dt)
 					s.Trace = decay*s.Trace + pre.ActivationVal*dt
 				}
 
@@ -573,12 +573,12 @@ func (l *Lobe) applyWinnerTakesAll() {
 //
 //	dTrace/dt = -Trace/tau + pre*post
 //
-// TraceDecay is the per-second decay rate. The old form
+// TraceDecay is the per-second decay rate, the synapse's own when it sets one
+// and the lobe's otherwise (traceDecayFor). The old form
 // `Trace = TraceDecay*Trace + pre*post` had no dt at all, so both the
 // accumulation and the time constant scaled with frame rate: the same simulated
 // second produced a trace of 16 at 15 TPS and 326 at 600.
 func (l *Lobe) updateTraces(dt float64) {
-	decay := decayFactor(l.PlasticityConfig.TraceDecay, dt)
 	for _, s := range l.Synapses {
 		if !s.Plastic {
 			continue
@@ -588,6 +588,7 @@ func (l *Lobe) updateTraces(dt float64) {
 		if !okFrom || !okTo {
 			continue // emitter targets are handled alongside emission
 		}
+		decay := decayFactor(traceDecayFor(s, l.PlasticityConfig), dt)
 		s.Trace = decay*s.Trace + pre.ActivationVal*post.ActivationVal*dt
 	}
 }

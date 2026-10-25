@@ -223,10 +223,23 @@ lobe.Modulators[brain.Serotonin] = serotonin
 ### Per-Synapse Settings
 
 ```go
-// Connect with custom min decay fraction
 synapse := lobe.Connect("input", "output", 0.5, true)
+
+// Give this synapse alone a wider reinforcement window than its lobe.
+synapse.TraceDecay = 0.15 // per second; 0 = use the lobe's
 // NOTE: MinDecayFrac is serialized but never read - decay has no floor.
 ```
+
+`Synapse.TraceDecay` (JSON `trace_decay`) overrides the eligibility-trace decay
+rate for one synapse. Left at 0 it falls back to the lobe's
+`PlasticityConfig.TraceDecay` — the owning lobe's for an intra-lobe synapse,
+the *target* lobe's for an inter-lobe one. `TraceDecay` is otherwise a lobe-wide
+setting, so widening the window in the lobe config widens it for every plastic
+synapse into that lobe, including ones you never meant to be reward-sensitive;
+setting it per synapse keeps the wide window on just the pathways you want
+teachable. Learning rates and inactivity decay still come from the lobe. The
+field is omitted from JSON when zero, so older files load unchanged, and the
+validator reports a negative value as `Invalid_Trace_Decay`.
 
 ## Recommended Starting Values
 

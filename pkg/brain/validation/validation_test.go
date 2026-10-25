@@ -158,3 +158,23 @@ func TestMissingNeuronsInLobeSynapse(t *testing.T) {
 	assert.Len(t, complaints, 1)
 	assert.Equal(t, Missing_Neuron_From, complaints[0].ComplaintType)
 }
+
+// A per-synapse TraceDecay of 0 means "use the lobe's"; a negative one is
+// silently treated the same way, which is never what the author meant.
+func TestInvalidSynapseTraceDecay(t *testing.T) {
+	br := brain.NewBrain()
+	l := brain.NewLobe("L", nil)
+	l.AddNeuron(&brain.Neuron{ID: "a", Activation: brain.ActLinear})
+	l.AddNeuron(&brain.Neuron{ID: "b", Activation: brain.ActLinear})
+	l.AddNeuron(&brain.Neuron{ID: "c", Activation: brain.ActLinear})
+	br.AddLobe(l)
+	good := l.Connect("a", "b", 0.5, true)
+	good.TraceDecay = 0.15
+	bad := l.Connect("a", "c", 0.5, true)
+	bad.TraceDecay = -0.15
+
+	complaints := ValidateBrain(br)
+	assert.Len(t, complaints, 1)
+	assert.Equal(t, Invalid_Trace_Decay, complaints[0].ComplaintType)
+	assert.Equal(t, bad.ID, complaints[0].ID)
+}

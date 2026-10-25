@@ -279,6 +279,11 @@ func weightComplaints(syn *brain.Synapse) []Complaint {
 			break
 		}
 	}
+	// A negative per-synapse TraceDecay is silently treated as "use the
+	// lobe's", which is almost certainly not what the author meant.
+	if syn.TraceDecay < 0 || math.IsNaN(syn.TraceDecay) || math.IsInf(syn.TraceDecay, 0) {
+		out = append(out, Complaint{ComplaintType: Invalid_Trace_Decay, ID: syn.ID})
+	}
 	// Only meaningful when bounds are actually set.
 	if syn.MinWeight < syn.MaxWeight {
 		if syn.InitWeight < syn.MinWeight || syn.InitWeight > syn.MaxWeight {

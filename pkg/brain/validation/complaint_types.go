@@ -25,4 +25,5 @@ const (
 	Non_Finite_Weight        ComplaintType = "Non_Finite_Weight"        // Weight, InitWeight or Trace is NaN or Inf
 	Lobe_Name_Key_Mismatch   ComplaintType = "Lobe_Name_Key_Mismatch"   // lobe.Name disagrees with its map key
 	Frozen_Persisting_Neuron ComplaintType = "Frozen_Persisting_Neuron" // Persisting neuron with DecayRate 0 can never change value
+	Invalid_Trace_Decay      ComplaintType = "Invalid_Trace_Decay"      // Synapse TraceDecay is negative, NaN or Inf (0 means "use the lobe's")
 )

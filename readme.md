@@ -103,5 +103,11 @@ All rates are **per second**, and all decay is exponential, so behaviour does
 not depend on the simulation's frame rate. `Brain.Step(dt)` takes the elapsed
 time in seconds.
 
+The eligibility-trace decay rate (`trace_decay`, per second) is set per lobe in
+`plasticity_config`, and a synapse may override it with its own `trace_decay`
+to get a wider or narrower reinforcement window than the rest of its lobe;
+0 or absent means "use the lobe's" (the target lobe's, for an inter-lobe
+synapse).
+
 Brain files carry a `format_version`; see `CurrentFormatVersion` in
 `pkg/brain/brain.go` for the history and what a version 0 file means.

@@ -141,11 +141,12 @@ func (b *Brain) Step(dt float64) {
 				continue
 			}
 
-			// Update eligibility trace using target lobe's plasticity config
-			// (source lobe has already been stepped, so its activations are current).
+			// Update eligibility trace using the synapse's own TraceDecay, or
+			// the target lobe's plasticity config when it sets none (source
+			// lobe has already been stepped, so its activations are current).
 			// Leaky integrator, matching Lobe.Step: TraceDecay is a per-second
 			// decay rate and the input term is scaled by dt.
-			decay := decayFactor(lobe.PlasticityConfig.TraceDecay, dt)
+			decay := decayFactor(traceDecayFor(syn, lobe.PlasticityConfig), dt)
 			syn.Trace = decay*syn.Trace + fromNeuron.ActivationVal*toNeuron.ActivationVal*dt
 		}
 	}
