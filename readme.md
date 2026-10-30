@@ -43,7 +43,7 @@ See each `cmd/*` folder for command-specific flags and usage.
 - `local_data/` — example JSON brains and training datasets used by tests and examples.
 - `pkg/` — core packages:
 	- `ann/` — artificial neural network implementations and training helpers
-	- `brain/` — higher-level brain model abstractions, integration tests, and utilities
+	- `brain/` — higher-level brain model abstractions, integration tests, and utilities; plasticity is three-factor (trace × dopamine/serotonin) and, per synapse, two-factor Hebbian (instar rule on activations alone, for familiarity, conjunctions and competitive recognition slots); see `docs/PLASTICITY_GUIDE.md`
 	- `pnn/` — probabilistic neural network helpers
 	- `gpt/` — minimal from-scratch GPT (pure-Go tensors, manual backprop); see `pkg/gpt/readme.md`
 

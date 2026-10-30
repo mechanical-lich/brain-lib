@@ -27,3 +27,10 @@ const (
 	Frozen_Persisting_Neuron ComplaintType = "Frozen_Persisting_Neuron" // Persisting neuron with DecayRate 0 can never change value
 	Invalid_Trace_Decay      ComplaintType = "Invalid_Trace_Decay"      // Synapse TraceDecay is negative, NaN or Inf (0 means "use the lobe's")
 )
+
+// Two-factor (Hebbian) learning. Warnings only: FixSynapses skips them, since
+// the right rate is a design decision, not a repair.
+const (
+	Hebbian_Without_Decay ComplaintType = "Hebbian_Without_Decay" // Hebbian synapse whose config has HebbianDecay 0: a binding is never forgotten, so a slot is never freed
+	Invalid_Hebbian_Rate  ComplaintType = "Invalid_Hebbian_Rate"  // A PlasticityConfig's HebbianRate or HebbianDecay is negative, NaN or Inf
+)

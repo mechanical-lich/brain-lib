@@ -1,5 +1,7 @@
 package brain
 
+import "math"
+
 type Synapse struct {
 	ID        string  `json:"id"`
 	From      string  `json:"from"`
@@ -23,6 +25,15 @@ type Synapse struct {
 	// synapse that shares the lobe. Additive and omitted when zero, so files
 	// without it load unchanged and CurrentFormatVersion stays 1.
 	TraceDecay float64 `json:"trace_decay,omitempty"`
+	// Hebbian makes the synapse learn from co-activity alone (two-factor),
+	// with no modulator involved, by the instar rule in applyHebbian. The rates
+	// come from the owning lobe's PlasticityConfig (the target lobe's for an
+	// inter-lobe synapse). Independent of Plastic: a synapse with both learns
+	// from co-activity always and from reward/punishment when a modulator is
+	// present. The Hebbian rule reads current activations, not the eligibility
+	// trace, so a Hebbian-only synapse keeps no trace. Additive and omitted
+	// when false, so CurrentFormatVersion stays 1.
+	Hebbian bool `json:"hebbian,omitempty"`
 	// MinDecayFrac is serialized but never read. Inactivity decay moves a weight
 	// toward InitWeight without a floor, so this has no effect — the plasticity
 	// guide documented it as active, which it never was. Kept so existing files
@@ -42,6 +53,40 @@ func traceDecayFor(syn *Synapse, lobeCfg PlasticityConfig) float64 {
 		return syn.TraceDecay
 	}
 	return lobeCfg.TraceDecay
+}
+
+// applyHebbian advances a Hebbian synapse by dt seconds under the instar
+// (competitive-learning) rule plus passive forgetting:
+//
+//	dW/dt = HebbianRate·post·(pre − W) + HebbianDecay·(InitWeight − W)
+//
+// pre and post are this step's activations (post-WTA). While the target fires,
+// W moves toward the source's activation: up from a present input, down from
+// an absent one. That depression is what lets a winner-takes-all lobe recruit
+// a fresh slot for a new feature bundle — a slot trained on one bundle loses
+// its weight from features it never saw, so on a novel bundle an untrained
+// slot still holding its small InitWeight responds more. With the target
+// silent only the forgetting term runs, whether the synapse is in use or not
+// (unlike inactivity decay, which runs only while a synapse is unused).
+//
+// It does not use the eligibility trace: post·(pre − W) is not a function of
+// the integrated pre·post. With activations held over the step the equation
+// is linear in W, so it is integrated exactly — W relaxes toward
+// (rate·post·pre + decay·InitWeight)/(rate·post + decay) at rate
+// rate·post + decay — and the result does not depend on frame rate, the same
+// reason decayFactor replaced the Euler form. It does not clip; callers clip
+// once after every rule for the step has run.
+func (s *Synapse) applyHebbian(cfg PlasticityConfig, pre, post, dt float64) {
+	k := cfg.HebbianRate*post + cfg.HebbianDecay
+	if k <= 0 {
+		// Only reachable with a signed (negative) post activation outweighing
+		// the decay: the equation then grows rather than relaxes, so there is
+		// no fixed point to integrate toward. Take a plain Euler step.
+		s.Weight += (cfg.HebbianRate*post*(pre-s.Weight) + cfg.HebbianDecay*(s.InitWeight-s.Weight)) * dt
+		return
+	}
+	target := (cfg.HebbianRate*post*pre + cfg.HebbianDecay*s.InitWeight) / k
+	s.Weight = target + (s.Weight-target)*math.Exp(-k*dt)
 }
 
 func (s *Synapse) Clip() {

@@ -170,6 +170,10 @@ func validateStructure(b *brain.Brain) []Complaint {
 		complaints = append(complaints, Complaint{ComplaintType: t, ID: id})
 	}
 
+	if invalidHebbianRates(b.PlasticityConfig) {
+		add(Invalid_Hebbian_Rate, "brain")
+	}
+
 	for _, r := range b.ChemicalReceptors {
 		if !brainLevelReceptorResolves(b, r) {
 			add(Dangling_Receptor_Target, r.ChemicalName+"->"+r.Target)
@@ -182,6 +186,9 @@ func validateStructure(b *brain.Brain) []Complaint {
 		}
 		if lobe.Name != key {
 			add(Lobe_Name_Key_Mismatch, key)
+		}
+		if invalidHebbianRates(lobe.PlasticityConfig) {
+			add(Invalid_Hebbian_Rate, key)
 		}
 
 		// A neuron and an emitter sharing an ID silently misroutes: Step
@@ -228,14 +235,49 @@ func validateStructure(b *brain.Brain) []Complaint {
 				add(Dangling_Emitter_Synapse, id)
 			}
 			complaints = append(complaints, weightComplaints(syn)...)
+			if syn.Hebbian && lobe.PlasticityConfig.HebbianDecay == 0 {
+				add(Hebbian_Without_Decay, id)
+			}
 		}
 	}
 
 	for _, syn := range b.Synapses {
 		complaints = append(complaints, weightComplaints(syn)...)
+		if syn.Hebbian && interLobeConfig(b, syn).HebbianDecay == 0 {
+			add(Hebbian_Without_Decay, syn.ID)
+		}
 	}
 
 	return complaints
+}
+
+// A Hebbian synapse with no decay never returns toward InitWeight while its
+// target is silent, so whatever it was last bound to it keeps forever: a
+// recognition slot is never freed for reuse, and a slot's depressed links
+// from features it never saw stay depressed. Coherent for a deliberate
+// permanent memory, but almost never what an author means. The instar rule
+// itself cannot run away (W moves toward the source's activation), so this is
+// reported whatever the bounds.
+//
+// interLobeConfig mirrors Brain.applyInterLobePlasticity: the target lobe's
+// config, or the brain's when the lobe has none (TraceDecay 0).
+func interLobeConfig(b *brain.Brain, syn *brain.Synapse) brain.PlasticityConfig {
+	if lobe, ok := b.Lobes[syn.ToLobe]; ok && lobe != nil && lobe.PlasticityConfig.TraceDecay != 0 {
+		return lobe.PlasticityConfig
+	}
+	return b.PlasticityConfig
+}
+
+// A negative HebbianDecay pushes weights away from InitWeight, and a negative
+// HebbianRate makes co-activity weaken a link — anti-Hebbian learning nobody
+// asked for. Checked on every config, whether or not a synapse uses it yet.
+func invalidHebbianRates(cfg brain.PlasticityConfig) bool {
+	for _, v := range []float64{cfg.HebbianRate, cfg.HebbianDecay} {
+		if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+			return true
+		}
+	}
+	return false
 }
 
 func brainLevelReceptorResolves(b *brain.Brain, r *brain.ChemicalReceptor) bool {

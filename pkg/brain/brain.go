@@ -155,10 +155,11 @@ func (b *Brain) Step(dt float64) {
 	b.applyInterLobePlasticity(dt)
 }
 
-// applyInterLobePlasticity applies reinforcement learning and inactivity decay to inter-lobe synapses
+// applyInterLobePlasticity applies reinforcement learning and inactivity decay
+// to plastic inter-lobe synapses, and the two-factor rule to Hebbian ones.
 func (b *Brain) applyInterLobePlasticity(dt float64) {
 	for _, syn := range b.Synapses {
-		if !syn.Plastic {
+		if !syn.Plastic && !syn.Hebbian {
 			continue
 		}
 
@@ -192,6 +193,25 @@ func (b *Brain) applyInterLobePlasticity(dt float64) {
 		if plasticityConfig.TraceDecay == 0 {
 			// Lobe doesn't have config set, use brain's
 			plasticityConfig = b.PlasticityConfig
+		}
+
+		if syn.Hebbian {
+			// Every lobe has stepped, so both activations are this tick's
+			// (post-WTA for the target).
+			var pre, post float64
+			if fromLobe, ok := b.Lobes[syn.FromLobe]; ok {
+				if n, ok := fromLobe.Neurons[syn.From]; ok {
+					pre = n.ActivationVal
+				}
+			}
+			if n, ok := toLobe.Neurons[syn.To]; ok {
+				post = n.ActivationVal
+			}
+			syn.applyHebbian(plasticityConfig, pre, post, dt)
+		}
+		if !syn.Plastic {
+			syn.Clip()
+			continue
 		}
 
 		// Reward strengthens active pathways

@@ -247,6 +247,102 @@ teachable. Learning rates and inactivity decay still come from the lobe. The
 field is omitted from JSON when zero, so older files load unchanged, and the
 validator reports a negative value as `Invalid_Trace_Decay`.
 
+## Two-factor vs three-factor
+
+Everything above is **three-factor** learning: a synapse changes only when
+pre/post co-activity (the trace) meets a modulator.
+
+```
+Weight += Trace · (RewardLearningRate · dopamine − PunishLearningRate · serotonin) · dt
+```
+
+No dopamine or serotonin, no change. That suits "this action paid off", but it
+cannot learn "these two things happened together": familiarity, feature
+conjunctions, place associations, which nothing rewards.
+
+A synapse with `Hebbian` set (JSON `hebbian: true`) also learns **two-factor**:
+from co-activity alone, with no modulator term, by the **instar**
+(competitive-learning) rule plus passive forgetting:
+
+```
+dW/dt = HebbianRate · post · (pre − W)  +  HebbianDecay · (InitWeight − W)
+then Clip()
+```
+
+- `pre` and `post` are the current activations (post-WTA), not the
+  eligibility trace: `post·(pre − W)` is not a function of the integrated
+  `pre·post`. A Hebbian-only synapse keeps no trace; a synapse that is also
+  `plastic` keeps one for its reward term.
+- While the target fires, `W` moves toward the source's activation. A present
+  feature grows its link and an absent one loses it. That depression is the
+  reason for the instar form. A plain `rate · pre · post` rule only ever adds,
+  so in a winner-takes-all lobe the first slot to win also wins every novel
+  bundle on its bias, and binds everything.
+- With the target silent only the forgetting term runs. `HebbianDecay` is
+  **passive**: it pulls toward `InitWeight` whether the synapse is in use or
+  not. Inactivity decay is different: it runs only while a synapse is unused,
+  and only on `Plastic` synapses. A Hebbian-only synapse gets no inactivity
+  decay.
+- `HebbianRate` and `HebbianDecay` (JSON `hebbian_rate`, `hebbian_decay`, both
+  per second) live in the lobe's `PlasticityConfig`, the target lobe's for an
+  inter-lobe synapse. Both default to 0 and are omitted from JSON when zero,
+  so older files load unchanged and `format_version` stays 1.
+- The equation is integrated exactly for each step's activations, so it does
+  not depend on frame rate. `W` relaxes toward
+  `(rate·post·pre + decay·InitWeight) / (rate·post + decay)` at rate
+  `rate·post + decay`. One simulated second gives 0.7251 / 0.7335 / 0.7359 at
+  15 / 60 / 600 TPS in the feedback fixture.
+- A synapse may be both `plastic` and `hebbian`. The Hebbian term always
+  applies; the reward/punishment term still needs a modulator.
+- A Hebbian synapse into a neuroemitter has no postsynaptic activation, so it
+  only forgets.
+
+**Bounds.** The rule pulls `W` toward the source's activation range on its
+own, so it cannot run away the way a pure `pre·post` rule can. For rectified
+neurons in `[0, 1]` that makes `[0, 1]` the natural bounds. Use `[0, max]` in
+any case: a Hebbian link has no business going inhibitory.
+
+**Recruitment needs a small positive `InitWeight`** on untrained Hebbian
+synapses, about 0.05. The tie-breaker is a trained slot's links from features
+it never saw, which it depresses below `InitWeight` while it fires. On a novel
+bundle an untrained slot still holds 0.05 from each feature and outbids it.
+With `InitWeight` 0 there is nothing to depress, the trained slot ties on its
+bias, and it wins again.
+
+```go
+recognition.WinnerTakesAll = true
+recognition.PlasticityConfig.HebbianRate = 2.0   // per second, at post = 1
+recognition.PlasticityConfig.HebbianDecay = 0.05 // unbinds an unused slot over ~20s
+
+syn := b.Connect("senses", "round", "recognition", "slot_1", 0.05, false)
+syn.Hebbian = true
+syn.MinWeight, syn.MaxWeight = 0, 1
+```
+
+Feature senses must live in a different lobe from the winner-takes-all slots,
+or WTA zeroes them too. Every slot needs the same small bias (say 0.1), so an
+untrained one fires when nothing matches.
+
+**Worked examples** in `pkg/brain/hebbian_test.go`:
+- `TestHebbianFamiliarityMemory`: a conjunction neuron (threshold 0.5) fed by
+  features at 0.3 fires only for two features together. Two half-second
+  co-presentations later, either feature alone is recognised. A feature that
+  was silent whenever it fired has its link depressed to 0.2.
+- `TestWinnerTakesAllGatesHebbianLearning`: only the WTA winner learns; the
+  losers' weights do not move.
+- `TestHebbianWTARecruitsAFreshSlot`: after f1+f2 binds slot s1 (f1 0.775, f3
+  depressed to 0.012), the novel bundle f3+f4 recruits s2, and f1+f2 still
+  goes to s1.
+
+**Zero decay.** With `HebbianDecay` 0 a binding is never forgotten once the
+pair falls silent, so a slot is never freed for reuse. The validator reports
+it as `Hebbian_Without_Decay`. It reports a negative, NaN or infinite
+`HebbianRate`/`HebbianDecay` on any config as `Invalid_Hebbian_Rate`. Both are
+warnings, and `validator repair` leaves them alone.
+
+**Known limit.** There is no normalization across a slot's links. A slot that
+keeps winning on varied bundles drifts toward their average.
+
 ## Recommended Starting Values
 
 For a Creatures-style game, start with these values:

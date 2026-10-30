@@ -1,6 +1,7 @@
 package validation
 
 import (
+	"math"
 	"testing"
 
 	"github.com/mechanical-lich/brain-lib/pkg/brain"
@@ -177,4 +178,117 @@ func TestInvalidSynapseTraceDecay(t *testing.T) {
 	assert.Len(t, complaints, 1)
 	assert.Equal(t, Invalid_Trace_Decay, complaints[0].ComplaintType)
 	assert.Equal(t, bad.ID, complaints[0].ID)
+}
+
+// hebbianPairBrain wires a Hebbian synapse from an always-on neuron into one
+// with a positive bias.
+func hebbianPairBrain(rate, decay float64) (*brain.Brain, *brain.Synapse) {
+	br := brain.NewBrain()
+	l := brain.NewLobe("L", nil)
+	l.PlasticityConfig.HebbianRate = rate
+	l.PlasticityConfig.HebbianDecay = decay
+	l.AddNeuron(&brain.Neuron{ID: "a", Bias: 1.0, Activation: brain.ActLinear})
+	l.AddNeuron(&brain.Neuron{ID: "b", Bias: 0.5, Activation: brain.ActLinear})
+	syn := l.Connect("a", "b", 0.05, false)
+	syn.Hebbian = true
+	syn.MinWeight, syn.MaxWeight = 0, 1
+	br.AddLobe(l)
+	return br, syn
+}
+
+func complaintsOfType(complaints []Complaint, ct ComplaintType) []Complaint {
+	var out []Complaint
+	for _, c := range complaints {
+		if c.ComplaintType == ct {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// (f) The instar rule is self-limiting: even into a biased neuron with no
+// decay, the weight settles at the source's activation (1) rather than running
+// to its bound. But with HebbianDecay 0 nothing ever unbinds it once the
+// source goes quiet, and the validator says so. Warning only — repair leaves
+// it alone. With decay the binding fades and nothing is reported.
+func TestHebbianWithoutDecayNeverForgetsAndIsReported(t *testing.T) {
+	step := func(br *brain.Brain, n int) {
+		for i := 0; i < n; i++ {
+			br.Step(1.0 / 60)
+		}
+	}
+	// Both quiet: with the target still firing, instar would (rightly) unbind
+	// the absent source; forgetting is about the pair falling silent.
+	silence := func(br *brain.Brain) {
+		br.Lobes["L"].Neurons["a"].Bias = 0
+		br.Lobes["L"].Neurons["b"].Bias = 0
+	}
+
+	br, syn := hebbianPairBrain(1.0, 0)
+	step(br, 600)
+	assert.InDelta(t, 1.0, syn.Weight, 1e-3, "W settles at the source's activation, not beyond")
+	silence(br)
+	step(br, 600)
+	assert.InDelta(t, 1.0, syn.Weight, 1e-3, "with no decay a silent pair keeps its binding forever")
+
+	got := complaintsOfType(ValidateBrain(br), Hebbian_Without_Decay)
+	if assert.Len(t, got, 1) {
+		assert.Equal(t, syn.ID, got[0].ID)
+	}
+	report, _ := FixSynapses(br, ValidateBrain(br))
+	assert.Contains(t, br.Lobes["L"].Synapses, syn.ID, "a warning must not delete the synapse")
+	for _, r := range report.Repairs {
+		assert.Equal(t, Skipped, r.Action)
+	}
+
+	br, syn = hebbianPairBrain(1.0, 0.5)
+	step(br, 600)
+	learned := syn.Weight
+	silence(br)
+	step(br, 600)
+	assert.Less(t, syn.Weight, learned/2, "with decay the binding fades once the pair is quiet")
+	assert.Empty(t, complaintsOfType(ValidateBrain(br), Hebbian_Without_Decay))
+}
+
+// The same check on an inter-lobe synapse, resolved against the target lobe's
+// config the way Brain.applyInterLobePlasticity resolves it.
+func TestHebbianWithoutDecayIsReportedInterLobe(t *testing.T) {
+	br := brain.NewBrain()
+	src := brain.NewLobe("src", nil)
+	dst := brain.NewLobe("dst", nil)
+	src.PlasticityConfig.HebbianDecay = 0.5 // the source's config must not matter
+	src.AddNeuron(&brain.Neuron{ID: "a", Activation: brain.ActLinear})
+	dst.AddNeuron(&brain.Neuron{ID: "b", Activation: brain.ActLinear})
+	br.AddLobe(src)
+	br.AddLobe(dst)
+	syn := br.Connect("src", "a", "dst", "b", 0.1, false)
+	syn.Hebbian = true
+
+	got := complaintsOfType(ValidateBrain(br), Hebbian_Without_Decay)
+	if assert.Len(t, got, 1) {
+		assert.Equal(t, syn.ID, got[0].ID)
+	}
+
+	dst.PlasticityConfig.HebbianDecay = 0.1
+	assert.Empty(t, complaintsOfType(ValidateBrain(br), Hebbian_Without_Decay))
+
+	// Non-Hebbian synapses are never reported, whatever the config says.
+	syn.Hebbian = false
+	dst.PlasticityConfig.HebbianDecay = 0
+	assert.Empty(t, complaintsOfType(ValidateBrain(br), Hebbian_Without_Decay))
+}
+
+func TestInvalidHebbianRates(t *testing.T) {
+	br := brain.NewBrain()
+	l := brain.NewLobe("L", nil)
+	l.PlasticityConfig.HebbianRate = -0.5
+	br.AddLobe(l)
+	br.PlasticityConfig.HebbianDecay = math.NaN()
+
+	got := complaintsOfType(ValidateBrain(br), Invalid_Hebbian_Rate)
+	ids := []string{}
+	for _, c := range got {
+		ids = append(ids, c.ID)
+	}
+	assert.ElementsMatch(t, []string{"L", "brain"}, ids)
 }

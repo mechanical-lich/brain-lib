@@ -15,6 +15,18 @@ type PlasticityConfig struct {
 	RewardLearningRate float64 `json:"reward_learning_rate"` // Learning rate for rewards, per second
 	PunishLearningRate float64 `json:"punish_learning_rate"` // Learning rate for punishment, per second
 	InactivityDecay    float64 `json:"inactivity_decay"`     // Rate weights return to baseline when unused, per second
+
+	// Two-factor (Hebbian) learning, used only by synapses with Hebbian set
+	// (see Synapse.applyHebbian). HebbianRate is how fast, per second at a
+	// post activation of 1, a weight moves toward its source's activation
+	// while the target fires; HebbianDecay relaxes it toward InitWeight
+	// whether used or not (unlike InactivityDecay, which only runs while a
+	// synapse is unused). Both per second. Additive and omitted when zero, so
+	// CurrentFormatVersion stays 1. Leave HebbianDecay at 0 only deliberately:
+	// a binding is then never forgotten, and the validator reports it
+	// (Hebbian_Without_Decay).
+	HebbianRate  float64 `json:"hebbian_rate,omitempty"`
+	HebbianDecay float64 `json:"hebbian_decay,omitempty"`
 }
 
 // DefaultPlasticityConfig returns sensible defaults for creature learning.
@@ -390,7 +402,10 @@ func (l *Lobe) Step(dt float64, now int, fallbackModulators map[string]*Modulato
 
 }
 
-// applyReinforcementLearning applies reward and punishment signals to plastic synapses
+// applyReinforcementLearning applies reward and punishment signals to plastic
+// synapses, and the two-factor rule to Hebbian ones (see Synapse.applyHebbian).
+// A synapse with both flags gets both, then one clip. A Hebbian synapse into
+// a neuroemitter has no postsynaptic activation, so it only forgets.
 func (l *Lobe) applyReinforcementLearning(dt float64, fallback map[string]*Modulator) {
 	// Get current chemical levels, falling back to the brain's modulators when
 	// this lobe has none of its own.
@@ -405,7 +420,21 @@ func (l *Lobe) applyReinforcementLearning(dt float64, fallback map[string]*Modul
 
 	// Apply reinforcement to each plastic synapse
 	for _, s := range l.Synapses {
+		if !s.Plastic && !s.Hebbian {
+			continue
+		}
+		if s.Hebbian {
+			var pre, post float64
+			if n, ok := l.Neurons[s.From]; ok {
+				pre = n.ActivationVal
+			}
+			if n, ok := l.Neurons[s.To]; ok {
+				post = n.ActivationVal
+			}
+			s.applyHebbian(l.PlasticityConfig, pre, post, dt)
+		}
 		if !s.Plastic {
+			s.Clip()
 			continue
 		}
 
