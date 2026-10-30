@@ -1,3 +1,10 @@
+---
+title: Neuroemitters
+parent: Brain
+nav_order: 7
+permalink: /brain/neuroemitters/
+---
+
 # Neuroemitters
 
 ## Overview

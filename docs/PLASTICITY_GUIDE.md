@@ -1,3 +1,10 @@
+---
+title: Plasticity
+parent: Brain
+nav_order: 4
+permalink: /brain/plasticity/
+---
+
 # Plasticity Guide
 
 > **Units note (2026-07-25):** every rate in `PlasticityConfig`, and every

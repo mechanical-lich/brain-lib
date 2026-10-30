@@ -1,3 +1,10 @@
+---
+title: GPT guide
+parent: GPT
+nav_order: 1
+permalink: /gpt/guide/
+---
+
 # GPT Guide
 
 This guide explains how the from-scratch GPT in `pkg/gpt` works: the data

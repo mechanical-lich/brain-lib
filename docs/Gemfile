@@ -1,0 +1,8 @@
+# Local preview of the documentation site. GitHub Pages builds it with the
+# github-pages gem, so this mirrors that environment.
+source "https://rubygems.org"
+
+gem "github-pages", group: :jekyll_plugins
+gem "jekyll-remote-theme"
+gem "jekyll-include-cache"
+gem "webrick"

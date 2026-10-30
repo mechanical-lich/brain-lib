@@ -36,10 +36,17 @@ Run the brain trainer example (binary `cmd/brain-trainer`):
 
 See each `cmd/*` folder for command-specific flags and usage.
 
+## Documentation
+
+The full documentation is a Jekyll site in [`docs/`](docs/), published at
+<https://mechanical-lich.github.io/brain-lib/>. It covers every package and
+command, the brain file format, the plasticity rules and the GPU backend.
+Preview it locally with `cd docs && bundle install && bundle exec jekyll serve`.
+
 ## Repository Layout
 
 - `cmd/` — small command-line tools and example programs (e.g., `brain-trainer`, `sandbox`, `validator`).
-- `docs/` — design notes and guides (e.g., `NEUROEMITTERS.md`, `PLASTICITY_GUIDE.md`, `GPT_GUIDE.md`).
+- `docs/` — the documentation site (Jekyll), including the design notes `NEUROEMITTERS.md`, `PLASTICITY_GUIDE.md` and `GPT_GUIDE.md`.
 - `local_data/` — example JSON brains and training datasets used by tests and examples.
 - `pkg/` — core packages:
 	- `ann/` — artificial neural network implementations and training helpers

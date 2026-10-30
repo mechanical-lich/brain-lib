@@ -1,0 +1,54 @@
+# Jekyll configuration for the brain-lib documentation site.
+#
+# Serve locally:   cd docs && bundle install && bundle exec jekyll serve
+# GitHub Pages:    Settings -> Pages -> Source: "Deploy from a branch",
+#                  branch main, folder /docs.
+
+title: brain-lib
+description: >-
+  Go packages and command-line tools for building, training and validating
+  the neural models used by the Critters project.
+url: https://mechanical-lich.github.io
+baseurl: /brain-lib
+
+remote_theme: just-the-docs/just-the-docs@v0.10.1
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+  - jekyll-include-cache
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  toc_levels: 2..3
+
+# just-the-docs
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+nav_external_links:
+  - title: brain-lib on GitHub
+    url: https://github.com/mechanical-lich/brain-lib
+aux_links:
+  GitHub: https://github.com/mechanical-lich/brain-lib
+back_to_top: true
+back_to_top_text: Back to top
+footer_content: >-
+  brain-lib is part of the Critters project.
+callouts:
+  note:
+    title: Note
+    color: blue
+  warning:
+    title: Warning
+    color: yellow
+
+# Only the pages that belong to the site. The design notes at the top of
+# docs/ (NEUROEMITTERS.md and friends) carry front matter and are included.
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor/
+  - .bundle/
+  - README.md
