@@ -33,6 +33,12 @@ Unused synapses slowly decay back toward their initial weight. This prevents:
 - Irrelevant learned behaviors persisting forever
 - Enables re-learning in new contexts
 
+A synapse is "unused" only while its source neuron's activation is exactly 0.
+A persisting or capacitor neuron with a `threshold` reaches exactly 0 once its
+carried activation decays below that threshold, so the links a faded memory
+feeds start to decay; with `threshold: 0` it fades asymptotically and its links
+stay in use.
+
 ## Integration with Your Game
 
 ### Basic Setup

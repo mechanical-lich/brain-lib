@@ -12,7 +12,7 @@ brain-lib is a collection of Go packages and command-line tools for building, tr
 
 Prerequisites:
 
-- Go 1.20+ installed
+- Go 1.25.1+ installed (the `go.mod` minimum)
 
 Clone the repo (if not already in your workspace) and run the tests / build examples:
 
@@ -102,6 +102,14 @@ its own map. They matter for routing, serialization and validation.
 All rates are **per second**, and all decay is exponential, so behaviour does
 not depend on the simulation's frame rate. `Brain.Step(dt)` takes the elapsed
 time in seconds.
+
+"Second" means a **simulated** second, as defined by the `dt` the caller
+supplies — the library has no wall clock. The critters game, for example,
+steps the brain with a constant `dt` of 0.1 at 60 ticks per wall second, so a
+brain there experiences six simulated seconds per wall second: a 1 s
+eligibility window (`trace_decay: 1.0`) lasts about 0.17 wall seconds, and a
+neuron `decay_rate` of 0.05/s halves in about 14 simulated seconds, or 2.3
+wall seconds.
 
 The eligibility-trace decay rate (`trace_decay`, per second) is set per lobe in
 `plasticity_config`, and a synapse may override it with its own `trace_decay`

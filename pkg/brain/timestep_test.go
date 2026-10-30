@@ -158,3 +158,16 @@ func TestReceptorCannotDeliverMoreThanThePoolHolds(t *testing.T) {
 	assert.LessOrEqual(t, consumed, 1.0, "consumed more than the pool contained")
 	assert.InDelta(t, out, consumed, 1e-9, "an excitatory receptor should deliver what it consumes")
 }
+
+// When a memory ends must not depend on the frame rate beyond the one step the
+// snap can lag the analytic crossing: ln(20) ≈ 3.0s at rate 1/s under a 0.05
+// threshold, at every step size.
+func TestMemoryEndIsFrameRateIndependent(t *testing.T) {
+	want := math.Log(20)
+	for _, dt := range []float64{1.0 / 15, 1.0 / 60, 1.0 / 240, 0.1} {
+		steps := stepsUntilZero(memoryLobe(0.05), dt, int(10/dt))
+		require.Positive(t, steps, "dt %.4f: the memory never ended", dt)
+		got := float64(steps) * dt
+		assert.InDelta(t, want, got, dt+1e-9, "dt %.4f: ended after %.3fs", dt, got)
+	}
+}

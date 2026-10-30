@@ -17,6 +17,12 @@ const (
 )
 
 // ChemicalReceptor represents a receptor in a lobe that responds to a specific chemical and applies it to a target neuron.
+//
+// With OutputNormalizationMin/Max set, the output is the concentration mapped
+// onto 0..1 and delivered as a level to a neuron target or as a rate (per
+// second, scaled by dt) to a modulator target. Consumption does not depend on
+// normalization: every receptor drains concentration*UptakeRate*dt from the
+// pool (clamped to what is there), whatever its target.
 type ChemicalReceptor struct {
 	ChemicalName           string       `json:"chemical_name"`            // Name of chemical receptor uses
 	UptakeRate             float64      `json:"uptake_rate"`              // Rate at which the chemical is taken up

@@ -190,3 +190,65 @@ func TestChemicalReceptor_NormalizedModulatorOutputStaysARate(t *testing.T) {
 	out, _ = cr.GetOutput(ch, 0.5)
 	assert.InDelta(t, 0.5, out, 1e-9)
 }
+
+// Normalization changes what a receptor delivers, never what it drains: a
+// normalized receptor consumes concentration*UptakeRate*dt like any other, for
+// both target types, through both the lobe and the brain paths. The plan
+// carried an open item claiming a normalized receptor consumed nothing and so
+// fed a modulator from nowhere; that stopped being true when consumption was
+// decoupled from output (2026-07-29), and this pins it.
+func TestChemicalReceptor_NormalizedReceptorsDrainAtUptakeRate(t *testing.T) {
+	const dt, pool, rate = 0.1, 40.0, 0.05
+	want := pool - pool*rate*dt // 40 - 0.2
+
+	normalized := func(target string, tt TargetType) *ChemicalReceptor {
+		return &ChemicalReceptor{
+			ChemicalName:           "c",
+			UptakeRate:             rate,
+			Target:                 target,
+			TargetType:             tt,
+			ReceptorType:           ReceptorTypeExcitatory,
+			OutputNormalizationMin: 0,
+			OutputNormalizationMax: 10, // saturated: reads strongly, drains slowly
+		}
+	}
+
+	t.Run("lobe, modulator target", func(t *testing.T) {
+		l := NewLobe("l", map[string]*Modulator{"m": {Name: "m"}})
+		l.ChemicalReceptors = []*ChemicalReceptor{normalized("m", TargetTypeModulator)}
+		ch := l.UpdateChemicalReceptors(dt, map[string]float64{"c": pool})
+		assert.InDelta(t, want, ch["c"], 1e-9)
+		assert.InDelta(t, dt, l.Modulators["m"].Level, 1e-9, "a saturated receptor hands a modulator 1/s")
+	})
+
+	t.Run("lobe, neuron target", func(t *testing.T) {
+		l := NewLobe("l", nil)
+		l.AddNeuron(&Neuron{ID: "n"})
+		l.ChemicalReceptors = []*ChemicalReceptor{normalized("n", TargetTypeNeuron)}
+		ch := l.UpdateChemicalReceptors(dt, map[string]float64{"c": pool})
+		assert.InDelta(t, want, ch["c"], 1e-9)
+		assert.InDelta(t, 1.0, l.Neurons["n"].ExternalInput, 1e-9, "a saturated receptor hands a neuron a full level")
+	})
+
+	t.Run("brain, modulator target", func(t *testing.T) {
+		b := NewBrain()
+		b.Modulators["m"] = &Modulator{Name: "m"}
+		b.ChemicalReceptors = []*ChemicalReceptor{normalized("m", TargetTypeModulator)}
+		ch := map[string]float64{"c": pool}
+		b.UpdateChemicalReceptors(dt, ch)
+		assert.InDelta(t, want, ch["c"], 1e-9)
+		assert.InDelta(t, dt, b.Modulators["m"].Level, 1e-9)
+	})
+
+	t.Run("brain, neuron target", func(t *testing.T) {
+		b := NewBrain()
+		l := NewLobe("l", nil)
+		l.AddNeuron(&Neuron{ID: "n"})
+		b.AddLobe(l)
+		b.ChemicalReceptors = []*ChemicalReceptor{normalized("l.n", TargetTypeNeuron)}
+		ch := map[string]float64{"c": pool}
+		b.UpdateChemicalReceptors(dt, ch)
+		assert.InDelta(t, want, ch["c"], 1e-9)
+		assert.InDelta(t, 1.0, l.Neurons["n"].ExternalInput, 1e-9)
+	})
+}

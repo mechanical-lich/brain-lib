@@ -98,6 +98,15 @@ chemicals = lobe.UpdateNeuroemitters(0.1, chemicals)
 2. `lobe.UpdateNeuroemitters(dt, chemistry)` - Emitters produce chemicals
 3. `lobe.UpdateChemicalReceptors(dt, chemistry)` - Receptors consume chemicals to affect neurons
 
+### Receptors: output vs consumption
+A receptor with `output_normalization_min`/`max` set maps the concentration
+onto 0..1 and delivers it as a **level** to a neuron target (its
+`ExternalInput` is consumed every step) or as a **rate** per second, scaled by
+`dt`, to a modulator target (which accumulates and decays on its own).
+Without normalization it delivers what it takes up. Either way consumption is
+always `concentration * uptake_rate * dt`, clamped to the pool — so a
+normalized receptor can read a pool strongly while draining it slowly.
+
 ### Synaptic Connections
 - Emitters can receive input from any neuron in the lobe via synapses
 - The `To` field of the synapse should match the emitter's ID
